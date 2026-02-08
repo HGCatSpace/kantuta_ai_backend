@@ -1,7 +1,9 @@
 {
     "dependencies": ["."],
     "graphs": {
-        "agent": "ai/agents/test_agent/test.py:agent"
+        "test": "ai/agents/test_agent/test.py:agent",
+        "ingestor": "ai/agents/ingestor/agent.py:agent",
+        "conversational_assistant": "ai/agents/conversational_assistant/agent.py:agent"
     },
     "env": ".env"
 }

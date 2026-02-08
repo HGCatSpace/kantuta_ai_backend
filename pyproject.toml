@@ -5,10 +5,22 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "argon2-cffi>=25.1.0",
+    "asyncpg>=0.31.0",
+    "bcrypt>=5.0.0",
+    "chroma>=0.2.0",
     "fastapi[standard]>=0.128.0",
+    "langchain-chroma>=1.1.0",
+    "langchain-community>=0.4.1",
+    "langchain-text-splitters>=1.1.0",
     "langchain[google-genai]>=1.2.7",
     "langgraph>=1.0.7",
     "langgraph-checkpoint-postgres>=3.0.4",
+    "passlib>=1.7.4",
+    "pypdf>=6.6.2",
+    "python-dotenv>=1.2.1",
+    "sqlalchemy>=2.0.46",
+    "sqlmodel>=0.0.32",
 ]
 
 [dependency-groups]

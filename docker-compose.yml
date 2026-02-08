@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   db:
     image: postgres:15
@@ -13,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kantuta"]
+      test: ["CMD-SHELL", "pg_isready -U kantuta -d kantuta_db"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,17 +19,43 @@ services:
     networks:
       - backend_net
 
+  chromadb:
+      image: chromadb/chroma:latest
+      container_name: kantuta_chroma
+      volumes:
+        - chroma_data:/chroma/chroma # Persistencia de vectores
+      ports:
+        - "8000:8000" # Puerto API estándar de Chroma
+      environment:
+        - IS_PERSISTENT=TRUE
+        - ANONYMIZED_TELEMETRY=FALSE
+      restart: unless-stopped
+      networks:
+        - backend_net
+
   ollama:
     image: ollama/ollama:latest
     container_name: kantuta_ollama
     environment:
-      OLLAMA_NUM_PARALLEL: 1
-      OLLAMA_MAX_LOADED_MODELS: 1
+      - OLLAMA_NUM_PARALLEL=1        
+      - OLLAMA_MAX_LOADED_MODELS=1   
+      - OLLAMA_FLASH_ATTENTION=1     # Aceleracion crítica
+      - OLLAMA_KEEP_ALIVE=-1         # Mantiene el modelo cargado siempre
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "11434:11434"
-    entrypoint: sh -c "ollama serve & sleep 5 && ollama pull qwen3:8b && wait"
+      - "11435:11434"
+    entrypoint: sh -c "ollama serve & sleep 5 && ollama pull qwen3:8b && ollama pull qwen3-embedding:8b && wait"
+    
+    # --- ACCESO A GPU ---
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1          
+              capabilities: [gpu]
+    
     restart: unless-stopped
     networks:
       - backend_net
@@ -39,7 +63,12 @@ services:
 volumes:
   db_data:
   ollama_data:
+  chroma_data: 
 
 networks:
   backend_net:
     driver: bridge
+
+# docker exec -it kantuta_ollama ollama run qwen3:8b
+# docker exec -it kantuta_ollama nvidia-smi
+# docker logs kantuta_db
