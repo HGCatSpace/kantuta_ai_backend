@@ -1,11 +1,12 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware 
 from psycopg_pool import AsyncConnectionPool 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver 
 from contextlib import asynccontextmanager
 from db import init_db, DATABASE_URL
 
 # Importar routers
-from app.routers import rol, action, user, caso, chat_session, agent_chat
+from app.routers import rol, action, user, caso, chat_session, agent_chat, auth
 
 # Modelos para registro
 from models.documentos import Documento 
@@ -47,6 +48,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Kantuta AI API")
 
+# --- CONFIGURACIÓN DE CORS ---
+# Esto permite que el Frontend (React) hable con el Backend
+origins = [
+    "http://localhost:5173", # Puerto por defecto de Vite
+    "http://localhost:3000", # Puerto alternativo
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,     # Quién puede entrar
+    allow_credentials=True,    # Permitir cookies/tokens
+    allow_methods=["*"],       # GET, POST, DELETE, etc.
+    allow_headers=["*"],       # Headers personalizados
+)
+
 # Incluir routers
 app.include_router(rol.router)
 app.include_router(action.router)
@@ -55,6 +72,7 @@ app.include_router(user.router)
 app.include_router(caso.router) 
 app.include_router(chat_session.router) 
 app.include_router(agent_chat.router)
+app.include_router(auth.router)
 
 @app.get("/")
 async def root():
