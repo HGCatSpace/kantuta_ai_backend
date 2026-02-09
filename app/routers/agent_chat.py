@@ -5,7 +5,7 @@ from models.chat_session import ChatSession
 from pydantic import BaseModel
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from langchain_core.messages import BaseMessage, message_to_dict
+from langchain_core.messages import BaseMessage, message_to_dict, HumanMessage
 from langchain_core.documents import Document
 # Importamos el BUILDER de tu agente
 from ai.agents.conversational_assistant.agent import builder 
