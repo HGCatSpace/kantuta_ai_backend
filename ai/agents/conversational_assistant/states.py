@@ -19,3 +19,7 @@ class RetrievalState(MessagesState):
     temperature: Optional[float] # Creatividad (0.0 a 1.0)
     top_p: Optional[float]       # Nucleus sampling (0.0 a 1.0)
     top_k: Optional[int]         # Token selection limit
+
+    question: str      # Entrada del usuario
+    documents: List    # Salida del retrieve_node
+    generation: str    # Salida del generate_node (o 'answer')
