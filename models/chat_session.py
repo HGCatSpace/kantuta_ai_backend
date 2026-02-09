@@ -14,11 +14,10 @@ def bolivia_now():
 # --- 1. CLASE BASE (Schema común) ---
 class ChatSessionBase(SQLModel):
     titulo: str = Field(default="Nuevo Chat", max_length=150)
-    usuario_id: int = Field(foreign_key="usuarios.id", index=True)
     
-    # Opcional: Un chat puede pertenecer a un caso o ser libre
-    caso_id: Optional[int] = Field(default=None, foreign_key="casos.id_caso")
+    caso_id: Optional[int] = Field(default=None, foreign_key="casos.id_caso", index=True)
     
+    es_activo: bool = Field(default=True)
     fecha_creacion: datetime = Field(default_factory=bolivia_now)
     ultimo_acceso: datetime = Field(default_factory=bolivia_now)
 
@@ -34,11 +33,10 @@ class ChatSession(ChatSessionBase, table=True):
 
 # --- 3. SCHEMAS (Pydantic) ---
 class ChatSessionCreate(SQLModel):
-    id_session: str # El frontend o backend debe generar este UUID
     titulo: str
-    usuario_id: int
-    caso_id: Optional[int] = None
+    caso_id: int
 
 class ChatSessionUpdate(SQLModel):
     titulo: Optional[str] = None
     ultimo_acceso: Optional[datetime] = None
+    es_activo: bool

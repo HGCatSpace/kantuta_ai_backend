@@ -1,4 +1,5 @@
 from typing import Optional, TYPE_CHECKING
+from enum import Enum
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from sqlmodel import SQLModel, Field, Relationship
@@ -10,11 +11,17 @@ if TYPE_CHECKING:
 def bolivia_now():
     return datetime.now(ZoneInfo("America/La_Paz")).replace(tzinfo=None)
 
+# --- ENUM del tipo de documento ---
+class EnumTipoDocumento(str, Enum):
+    GENERADO = "GENERADO"
+    INGRESADO = "INGRESADO"
+
 # --- 1. CLASE BASE ---
 class DocumentoBase(SQLModel):
     nombre_archivo: str = Field(max_length=255)
     ruta: str 
     hash_verificacion: Optional[str] = Field(default=None, max_length=64) 
+    tipo_documento: EnumTipoDocumento = Field(default=None)
     
     tipo_mime: Optional[str] = Field(default="application/pdf")
     
