@@ -9,6 +9,7 @@ from models.links import UsuarioActionLink
 if TYPE_CHECKING:
     from models.rol import Rol
     from models.action import Action
+    from models.casos import Caso
 
 def bolivia_now():
     """Retorna la fecha y hora actual en zona horaria de La Paz"""
@@ -43,6 +44,8 @@ class Usuario(UsuarioBase, table=True):
     rol: Optional["Rol"] = Relationship(back_populates="usuarios")
 
     # 2. Relación con Acciones (N:N - Muchos usuarios tienen muchas acciones)
+    casos: List["Caso"] = Relationship(back_populates="usuario")
+
     actions: List["Action"] = Relationship(
         back_populates="usuarios",
         link_model=UsuarioActionLink
