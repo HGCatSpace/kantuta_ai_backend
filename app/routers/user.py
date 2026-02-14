@@ -1,11 +1,14 @@
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, status, HTTPException, Query
 from sqlmodel import select
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
+from app.core.deps import get_current_user
 
 from db import get_session
 from models.user import Usuario, UsuarioCreate, UsuarioUpdate, ActiveUserEnum
@@ -22,6 +25,77 @@ pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+
+@router.get("/me", response_model=Usuario)
+async def read_users_me(
+    session: AsyncSession = Depends(get_session),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Este endpoint atrapa '/users/me' ANTES de que llegue al de abajo.
+    Usa el token para saber quién eres.
+    Carga relaciones (rol, actions) para el frontend.
+    """
+    statement = select(Usuario).where(Usuario.id == current_user.id).options(
+        selectinload(Usuario.rol),
+        selectinload(Usuario.actions)
+    )
+    result = await session.execute(statement)
+    return result.scalar_one()
+
+# ==========================================
+# 0. DASHBOARD (DTOs y Endpoint)
+# ==========================================
+
+class UserDashboardSchema(BaseModel):
+    id: int
+    nombre_completo: str
+    email: str
+    rol: Optional[str] = None       # Nombre del rol (ej: "Abogado Senior")
+    casos_activos: int = 0          # Conteo de casos
+    documentos_recientes: int = 0   # Conteo de docs
+    ultimo_acceso: datetime         # Mapeado desde fecha_ultima_modificacion
+
+@router.get("/dashboard", response_model=UserDashboardSchema)
+async def read_dashboard_data(
+    session: AsyncSession = Depends(get_session),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Endpoint para alimentar el 'Dashboard de Usuario v2'.
+    Retorna información agregada y transforma IDs a nombres legibles.
+    """
+    # Recargamos relaciones necesarias para contar
+    # Nota: selectinload es eficiente para 1:N
+    statement = select(Usuario).where(Usuario.id == current_user.id).options(
+        selectinload(Usuario.rol),
+        selectinload(Usuario.casos),
+        selectinload(Usuario.documentos_conocimiento)
+    )
+    result = await session.execute(statement)
+    user_loaded = result.scalar_one()
+
+    # Mapeo manual al Schema (DTO)
+    return UserDashboardSchema(
+        id=user_loaded.id,
+        nombre_completo=user_loaded.nombre_completo,
+        email=user_loaded.email,
+        # Si tiene rol, usamos su nombre, sino None
+        rol=user_loaded.rol.nombre if user_loaded.rol else "Sin Rol",
+        # Contamos las listas cargadas
+        casos_activos=len(user_loaded.casos),
+        documentos_recientes=len(user_loaded.documentos_conocimiento),
+        # Requerimiento específico: ultimo_acceso = fecha_ultima_modificacion
+        ultimo_acceso=user_loaded.fecha_ultima_modificacion
+    )
+
+# --- COUNT ---
+@router.get("/count")
+async def count_users(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(func.count()).select_from(Usuario))
+    total = result.scalar_one()
+    return {"total": total}
 
 # --- 1. CREATE (POST) ---
 @router.post("/", response_model=Usuario, status_code=status.HTTP_201_CREATED)

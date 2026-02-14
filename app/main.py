@@ -6,12 +6,17 @@ from contextlib import asynccontextmanager
 from db import init_db, DATABASE_URL
 
 # Importar routers
-from app.routers import rol, action, user, caso, chat_session, agent_chat, auth
+from app.routers import rol, action, user, caso, chat_session, agent_chat, auth, documento_comocimiento, system_prompt
 
 # Modelos para registro
 from models.documentos import Documento 
 from models.chat_session import ChatSession
 from models.casos import Caso
+from models.documento_conocimiento import DocumentoConocimiento
+from models.rol import Rol
+from models.system_prompt import SystemPrompt
+from models.links import PromptDocumentoLink
+
 
 DB_URI_LANGGRAPH = DATABASE_URL.replace("+asyncpg", "")
 
@@ -73,6 +78,8 @@ app.include_router(caso.router)
 app.include_router(chat_session.router) 
 app.include_router(agent_chat.router)
 app.include_router(auth.router)
+app.include_router(documento_comocimiento.router)
+app.include_router(system_prompt.router)
 
 @app.get("/")
 async def root():

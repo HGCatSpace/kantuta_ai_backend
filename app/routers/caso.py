@@ -61,17 +61,31 @@ async def read_casos(
     result = await session.execute(statement)
     return result.scalars().all()
 
+# --- 2.1 ÚLTIMOS 5 CASOS MODIFICADOS (GET) ---
+@router.get("/recent", response_model=List[Caso])
+async def read_recent_casos(
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Retorna los 5 casos más recientemente actualizados.
+    """
+    statement = select(Caso).order_by(Caso.fecha_actualizacion.desc()).limit(5)
+    result = await session.execute(statement)
+    return result.scalars().all()
+
 # --- 3. LEER CASOS POR USUARIO (GET) ---
 @router.get("/usuario/{usuario_id}", response_model=List[Caso])
 async def read_casos_by_user(
     usuario_id: int,
+    offset: int = Query(0, description="Casos a omitir"), 
+    limit: int = Query(10, description="Número de casos"), 
     session: AsyncSession = Depends(get_session)
 ):
     """
     Obtiene todos los casos asignados a un usuario específico.
     """
 
-    statement = select(Usuario).where(Usuario.id == usuario_id)
+    statement = select(Usuario).where(Usuario.id == usuario_id).offset(offset).limit(limit)
     result = await session.execute(statement)
     user = result.scalar_one_or_none()
     
