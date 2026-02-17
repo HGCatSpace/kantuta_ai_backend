@@ -28,6 +28,12 @@ class EnumIconoArchivo(str, Enum):
     DOC = "doc"       # Color Azul
     OTHER = "other"   # Color Gris
 
+class EnumEstadoIndexacion(str, Enum):
+    PENDIENTE = "PENDIENTE"
+    PROCESANDO = "PROCESANDO"
+    COMPLETADO = "COMPLETADO"
+    ERROR = "ERROR"
+
 # ==========================================
 # 1. MODELO BASE (Campos compartidos)
 # ==========================================
@@ -61,6 +67,7 @@ class DocumentoConocimiento(DocumentoConocimientoBase, table=True):
     # --- FECHAS DE AUDITORÍA (Bolivia) ---
     fecha_creacion: datetime = Field(default_factory=bolivia_now)
     ultima_modificacion: datetime = Field(default_factory=bolivia_now)
+    estado_indexacion: EnumEstadoIndexacion = Field(default=EnumEstadoIndexacion.PENDIENTE)
 
 # ==========================================
 # 3. MODELO CREATE (Input para POST)
@@ -86,6 +93,6 @@ class DocumentoConocimientoUpdate(SQLModel):
 # ==========================================
 class DocumentoConocimientoPublic(DocumentoConocimientoBase):
     id_documento: int
+    estado_indexacion: EnumEstadoIndexacion
     fecha_creacion: datetime
     ultima_modificacion: datetime
-    nombre_uploader: Optional[str] = None

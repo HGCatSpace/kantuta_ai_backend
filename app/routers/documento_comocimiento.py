@@ -1,15 +1,16 @@
 import os
 import shutil
+import asyncio
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, status, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from sqlmodel import select, col
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
-from db import get_session
+from db import get_session, engine
 from models.user import Usuario
 from models.documento_conocimiento import (
     DocumentoConocimiento,
@@ -17,6 +18,7 @@ from models.documento_conocimiento import (
     DocumentoConocimientoPublic,
     EnumCategoriaBiblioteca,
     EnumIconoArchivo,
+    EnumEstadoIndexacion,
     bolivia_now,
 )
 
@@ -69,7 +71,7 @@ async def create_documento(
     # 2. Detectar icono por extensión
     icono = _detect_icono(original_name)
 
-    # 3. Crear registro en BD
+    # 3. Crear registro en BD (estado = PROCESANDO)
     new_doc = DocumentoConocimiento(
         titulo=titulo,
         categoria=categoria,
@@ -79,12 +81,53 @@ async def create_documento(
         ruta=str(file_path),
         nombre_archivo=original_name,
         usuario_id=current_user.id,
+        estado_indexacion=EnumEstadoIndexacion.PROCESANDO,
     )
 
     try:
         session.add(new_doc)
         await session.commit()
         await session.refresh(new_doc)
+
+        # 4. Ingestar en ChromaDB (background para no bloquear la respuesta)
+        from app.services.ingestion import ingest_file
+
+        extra_meta = {
+            "titulo": titulo,
+            "categoria": str(categoria.value) if categoria else "Otros",
+        }
+
+        doc_id = new_doc.id_documento
+
+        async def _run_ingest():
+            """Background task: ingesta + actualización de estado."""
+            async_session = sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+            async with async_session() as bg_session:
+                try:
+                    count = await ingest_file(str(file_path), original_name, extra_meta)
+                    print(f"✅ [UPLOAD] {count} chunks indexados para '{original_name}'")
+                    # Marcar como COMPLETADO
+                    doc_db = await bg_session.get(DocumentoConocimiento, doc_id)
+                    if doc_db:
+                        doc_db.estado_indexacion = EnumEstadoIndexacion.COMPLETADO
+                        bg_session.add(doc_db)
+                        await bg_session.commit()
+                except Exception as ie:
+                    print(f"⚠️ [UPLOAD] Error indexando '{original_name}': {ie}")
+                    # Marcar como ERROR
+                    try:
+                        doc_db = await bg_session.get(DocumentoConocimiento, doc_id)
+                        if doc_db:
+                            doc_db.estado_indexacion = EnumEstadoIndexacion.ERROR
+                            bg_session.add(doc_db)
+                            await bg_session.commit()
+                    except Exception:
+                        pass
+
+        asyncio.create_task(_run_ingest())
+
         return new_doc
     except Exception as e:
         # Limpiar archivo si falla el guardado en BD
@@ -188,8 +231,7 @@ async def download_documento(
 
     return FileResponse(
         path=str(file_path),
-        filename=doc.nombre_archivo or file_path.name,
-        media_type="application/octet-stream",
+        filename=file_path.name,
     )
 
 
@@ -231,10 +273,21 @@ async def delete_documento(
     if not doc_db:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
 
+    # Eliminar chunks de ChromaDB
+    source_filename = doc_db.ruta
+    if source_filename:
+        from app.services.ingestion import delete_file_chunks
+        try:
+            deleted = await delete_file_chunks(source_filename)
+            print(f"🗑️  [DELETE] {deleted} chunks eliminados de ChromaDB para '{source_filename}'")
+        except Exception as e:
+            print(f"⚠️ [DELETE] Error eliminando chunks: {e}")
+
     # Eliminar archivo físico
     file_path = Path(doc_db.ruta)
     if file_path.exists():
         file_path.unlink()
+        print(f"🗑️  [DELETE] Archivo eliminado: {file_path}")
 
     await session.delete(doc_db)
     await session.commit()

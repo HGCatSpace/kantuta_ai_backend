@@ -19,12 +19,5 @@ class PromptDocumentoLink(SQLModel, table=True):
 
     # Claves foráneas compuestas (Primary Key Compuesta)
     id: int = Field(primary_key=True)
-    system_prompt_id: int = Field(
-        foreign_key="system_prompts.id_prompt", 
-        primary_key=True
-    )
-    
-    documento_id: int = Field(
-        foreign_key="documentos_conocimiento.id_documento", 
-        primary_key=True
-    )
+    system_prompt_id: int = Field(foreign_key="system_prompts.id_prompt")
+    documento_id: int = Field(foreign_key="documentos_conocimiento.id_documento")

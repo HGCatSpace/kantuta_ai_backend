@@ -65,6 +65,7 @@ class SystemPromptPublic(SystemPromptBase):
     nombre_creador: Optional[str] = None
     fecha_creacion: datetime
     fecha_actualizacion: datetime
+    documentos_conocimiento: List[int] = []
 
 # ==========================================
 # 4. MODELO CREATE (Input para POST)
@@ -74,7 +75,7 @@ class SystemPromptCreate(SystemPromptBase):
     Datos necesarios para crear un prompt.
     El 'id_experto_creador' no se pide aquí, se inyecta desde el Token del usuario logueado.
     """
-    pass
+    documentos_conocimiento: List[int] = []
 
 # ==========================================
 # 5. MODELO UPDATE (Input para PATCH)
@@ -93,3 +94,4 @@ class SystemPromptUpdate(SQLModel):
     top_p: Optional[float] = None
     penalizacion_frecuencia: Optional[float] = None
     tokens_maximos: Optional[int] = None
+    documentos_conocimiento: Optional[List[int]] = None

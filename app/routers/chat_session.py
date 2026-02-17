@@ -30,7 +30,7 @@ async def create_chat_session(
     Crea una nueva sesión. Genera un UUID automático para LangGraph.
     """
     # 1. Validar Caso
-    caso = await session.get(Usuario, chat_data.caso_id)
+    caso = await session.get(Caso, chat_data.caso_id)
     if not caso:
         raise HTTPException(status_code=404, detail="Caso no encontrado")
 
@@ -42,7 +42,7 @@ async def create_chat_session(
         id_session=new_uuid, # <--- ID generado aquí
         titulo=chat_data.titulo,
         caso_id=chat_data.caso_id,
-        es_activo=True
+        system_prompt_id = chat_data.system_prompt_id
     )
     
     try:

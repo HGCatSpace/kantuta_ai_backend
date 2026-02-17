@@ -1,13 +1,27 @@
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, status, HTTPException, Query
-from sqlmodel import select
+from sqlmodel import select, SQLModel
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_session
 from models.casos import Caso, CasoCreate, CasoUpdate, EstadoCaso
+from models.documentos import Documento
 from models.user import Usuario
+
+
+# --- DTO para detalle de caso (NO toca el modelo de BD) ---
+class CasoDetail(SQLModel):
+    id_caso: int
+    titulo: str
+    descripcion: Optional[str] = None
+    estado: EstadoCaso
+    fecha_creacion: datetime
+    fecha_actualizacion: datetime
+    usuario_id: int
+    total_documentos: int
 
 router = APIRouter(
     prefix="/casos",
@@ -69,9 +83,38 @@ async def read_recent_casos(
     """
     Retorna los 5 casos más recientemente actualizados.
     """
-    statement = select(Caso).order_by(Caso.fecha_actualizacion.desc()).limit(5)
+    statement = select(Caso).where(Caso.estado == EstadoCaso.ABIERTO).order_by(Caso.fecha_actualizacion.desc()).limit(5)
     result = await session.execute(statement)
     return result.scalars().all()
+
+# --- 2.2 DETALLE DE UN CASO (GET) ---
+@router.get("/{id_caso}/detail", response_model=CasoDetail)
+async def read_caso_detail(
+    id_caso: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Retorna el caso con el conteo total de documentos vinculados.
+    """
+    caso = await session.get(Caso, id_caso)
+    if not caso:
+        raise HTTPException(status_code=404, detail="Caso no encontrado")
+
+    # Contar documentos vinculados al caso
+    count_stmt = select(func.count()).select_from(Documento).where(Documento.caso_id == id_caso)
+    count_result = await session.execute(count_stmt)
+    total_docs = count_result.scalar_one()
+
+    return CasoDetail(
+        id_caso=caso.id_caso,
+        titulo=caso.titulo,
+        descripcion=caso.descripcion,
+        estado=caso.estado,
+        fecha_creacion=caso.fecha_creacion,
+        fecha_actualizacion=caso.fecha_actualizacion,
+        usuario_id=caso.usuario_id,
+        total_documentos=total_docs,
+    )
 
 # --- 3. LEER CASOS POR USUARIO (GET) ---
 @router.get("/usuario/{usuario_id}", response_model=List[Caso])

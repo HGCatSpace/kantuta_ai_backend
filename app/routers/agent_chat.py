@@ -1,4 +1,6 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from db import get_session
 from models.chat_session import ChatSession
@@ -22,6 +24,134 @@ class UserMessage(BaseModel):
 # --- Helper Fecha ---
 def bolivia_now():
     return datetime.now(ZoneInfo("America/La_Paz")).replace(tzinfo=None)
+
+# ==================================================
+# CHAT GENERAL (sin sesión en DB)
+# ==================================================
+
+@router.post("/general/message")
+async def general_chat_message(
+    user_msg: UserMessage,
+    thread_id: str = None,
+    request: Request = None,
+):
+    """
+    Chat de propósito general. No requiere sesión en DB.
+    Usa thread_id directo con LangGraph.
+    """
+    import uuid
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+        print(f"Thread ID: {thread_id}")
+
+    checkpointer = request.app.state.checkpointer
+    if not checkpointer:
+        raise HTTPException(status_code=500, detail="Checkpointer no inicializado")
+
+    agent_with_memory = builder.compile(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": thread_id}}
+
+    human_message = HumanMessage(content=user_msg.content)
+    try:
+        result = await agent_with_memory.ainvoke({"messages": human_message}, config=config)
+    except Exception as e:
+        print(f"Error en LangGraph (general): {e}")
+        raise HTTPException(status_code=500, detail=f"Error del Agente: {str(e)}")
+
+    return {
+        "response": result,
+        "thread_id": thread_id,
+    }
+
+
+@router.get("/general/state")
+async def general_chat_state(
+    thread_id: str,
+    request: Request,
+):
+    """
+    Recupera el estado del chat general por thread_id.
+    No valida contra la tabla ChatSession.
+    """
+    checkpointer = request.app.state.checkpointer
+    if not checkpointer:
+        raise HTTPException(status_code=500, detail="Checkpointer no cargado")
+
+    agent = builder.compile(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": thread_id}}
+
+    snapshot = await agent.aget_state(config)
+
+    if not snapshot.values:
+        return {
+            "status": "empty",
+            "thread_id": thread_id,
+            "state": {}
+        }
+
+    raw_state = snapshot.values
+    clean_state = {}
+
+    for key, value in raw_state.items():
+        if isinstance(value, list) and value and isinstance(value[0], BaseMessage):
+            clean_state[key] = [message_to_dict(msg) for msg in value]
+        elif isinstance(value, list) and value and isinstance(value[0], Document):
+            clean_state[key] = [
+                {"page_content": doc.page_content, "metadata": doc.metadata}
+                for doc in value
+            ]
+        else:
+            clean_state[key] = value
+
+    return {
+        "thread_id": thread_id,
+        "created_at": snapshot.created_at,
+        "state": clean_state,
+    }
+
+
+# ==================================================
+# STREAMING — General (no DB session)
+# ==================================================
+
+@router.post("/general/stream")
+async def stream_general_chat(
+    user_msg: UserMessage,
+    thread_id: str = None,
+    request: Request = None,
+):
+    """
+    Streaming endpoint for general chat — yields tokens as SSE events.
+    """
+    import uuid
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+
+    checkpointer = request.app.state.checkpointer
+    if not checkpointer:
+        raise HTTPException(status_code=500, detail="Checkpointer no inicializado")
+
+    agent_with_memory = builder.compile(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": thread_id}}
+    human_message = HumanMessage(content=user_msg.content)
+
+    async def event_generator():
+        try:
+            async for event in agent_with_memory.astream_events(
+                {"messages": human_message}, config=config, version="v2"
+            ):
+                kind = event.get("event")
+                if kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        yield f"data: {json.dumps({'token': chunk.content})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            print(f"Error en streaming (general): {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 
 @router.post("/{session_id}/message")
 async def chat_with_agent(
@@ -92,6 +222,57 @@ async def chat_with_agent(
         "response": result,
         "session_id": session_id
     }
+
+
+# ==================================================
+# STREAMING — Session-based
+# ==================================================
+
+@router.post("/{session_id}/stream")
+async def stream_chat_with_agent(
+    session_id: str,
+    user_msg: UserMessage,
+    request: Request,
+    db_session: AsyncSession = Depends(get_session),
+):
+    """
+    Streaming endpoint — yields tokens as SSE events.
+    """
+    chat_db = await db_session.get(ChatSession, session_id)
+    if not chat_db:
+        raise HTTPException(status_code=404, detail="Sesión de chat no encontrada")
+    if not chat_db.es_activo:
+        raise HTTPException(status_code=400, detail="Este chat está archivado/cerrado.")
+
+    checkpointer = request.app.state.checkpointer
+    if not checkpointer:
+        raise HTTPException(status_code=500, detail="Error: Checkpointer no inicializado")
+
+    agent_with_memory = builder.compile(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": session_id}}
+    human_message = HumanMessage(content=user_msg.content)
+
+    async def event_generator():
+        try:
+            async for event in agent_with_memory.astream_events(
+                {"messages": human_message}, config=config, version="v2"
+            ):
+                kind = event.get("event")
+                if kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        yield f"data: {json.dumps({'token': chunk.content})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            print(f"Error en streaming (session): {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # Update ultimo_acceso after streaming completes
+            chat_db.ultimo_acceso = bolivia_now()
+            db_session.add(chat_db)
+            await db_session.commit()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 

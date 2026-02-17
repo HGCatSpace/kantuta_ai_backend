@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from db import init_db, DATABASE_URL
 
 # Importar routers
-from app.routers import rol, action, user, caso, chat_session, agent_chat, auth, documento_comocimiento, system_prompt
+from app.routers import rol, action, user, caso, chat_session, agent_chat, auth, documento_comocimiento, system_prompt, knowledge_search
 
 # Modelos para registro
 from models.documentos import Documento 
@@ -80,6 +80,7 @@ app.include_router(agent_chat.router)
 app.include_router(auth.router)
 app.include_router(documento_comocimiento.router)
 app.include_router(system_prompt.router)
+app.include_router(knowledge_search.router)
 
 @app.get("/")
 async def root():

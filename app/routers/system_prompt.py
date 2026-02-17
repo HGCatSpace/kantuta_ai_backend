@@ -14,6 +14,7 @@ from models.system_prompt import (
     SystemPromptPublic,
     bolivia_now,
 )
+from models.links import PromptDocumentoLink
 
 router = APIRouter(
     prefix="/prompts",
@@ -28,6 +29,10 @@ def _to_public(prompt: SystemPrompt) -> SystemPromptPublic:
         prompt.experto_creador.nombre_completo
         if prompt.experto_creador else None
     )
+    # Include linked document IDs
+    data["documentos_conocimiento"] = [
+        doc.id_documento for doc in prompt.documentos_conocimiento
+    ] if prompt.documentos_conocimiento else []
     return SystemPromptPublic.model_validate(data)
 
 
@@ -40,7 +45,7 @@ async def create_prompt(
     session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(get_current_user),
 ):
-    prompt_dict = prompt_data.model_dump()
+    prompt_dict = prompt_data.model_dump(exclude={"documentos_conocimiento"})
     prompt_dict["id_experto_creador"] = current_user.id
 
     new_prompt = SystemPrompt.model_validate(prompt_dict)
@@ -50,13 +55,22 @@ async def create_prompt(
         await session.commit()
         await session.refresh(new_prompt)
 
-        # Recargar con relación del creador
         result = await session.execute(
             select(SystemPrompt)
-            .options(selectinload(SystemPrompt.experto_creador))
+            .options(
+                selectinload(SystemPrompt.experto_creador),
+                selectinload(SystemPrompt.documentos_conocimiento),
+            )
             .where(SystemPrompt.id_prompt == new_prompt.id_prompt)
         )
         new_prompt = result.scalar_one()
+
+        # Agregar a la tabla de prompt_documento_link
+        for doc_id in prompt_data.documentos_conocimiento:
+            link = PromptDocumentoLink(system_prompt_id=new_prompt.id_prompt, documento_id=doc_id)
+            session.add(link)
+        await session.commit()
+
         return _to_public(new_prompt)
     except Exception as e:
         await session.rollback()
@@ -75,7 +89,10 @@ async def read_prompts(
     session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(get_current_user),
 ):
-    query = select(SystemPrompt).options(selectinload(SystemPrompt.experto_creador))
+    query = select(SystemPrompt).options(
+        selectinload(SystemPrompt.experto_creador),
+        selectinload(SystemPrompt.documentos_conocimiento),
+    )
 
     if search:
         query = query.where(col(SystemPrompt.nombre).ilike(f"%{search}%"))
@@ -127,7 +144,10 @@ async def read_prompt(
 ):
     result = await session.execute(
         select(SystemPrompt)
-        .options(selectinload(SystemPrompt.experto_creador))
+        .options(
+            selectinload(SystemPrompt.experto_creador),
+            selectinload(SystemPrompt.documentos_conocimiento),
+        )
         .where(SystemPrompt.id_prompt == id_prompt)
     )
     prompt = result.scalar_one_or_none()
@@ -158,16 +178,37 @@ async def update_prompt(
     update_data = prompt_update.model_dump(exclude_unset=True)
     update_data["fecha_actualizacion"] = bolivia_now()
 
+    # Handle documentos_conocimiento separately (it's a link table, not a column)
+    doc_ids = update_data.pop("documentos_conocimiento", None)
+
     prompt_db.sqlmodel_update(update_data)
 
     session.add(prompt_db)
     await session.commit()
     await session.refresh(prompt_db)
 
+    # Sync link table if documentos_conocimiento was provided
+    if doc_ids is not None:
+        # Delete existing links
+        existing = await session.execute(
+            select(PromptDocumentoLink).where(
+                PromptDocumentoLink.system_prompt_id == id_prompt
+            )
+        )
+        for link in existing.scalars().all():
+            await session.delete(link)
+        # Add new links
+        for doc_id in doc_ids:
+            session.add(PromptDocumentoLink(system_prompt_id=id_prompt, documento_id=doc_id))
+        await session.commit()
+
     # Recargar con relación
     result = await session.execute(
         select(SystemPrompt)
-        .options(selectinload(SystemPrompt.experto_creador))
+        .options(
+            selectinload(SystemPrompt.experto_creador),
+            selectinload(SystemPrompt.documentos_conocimiento),
+        )
         .where(SystemPrompt.id_prompt == id_prompt)
     )
     prompt_db = result.scalar_one()
@@ -185,7 +226,10 @@ async def delete_prompt(
 ):
     result = await session.execute(
         select(SystemPrompt)
-        .options(selectinload(SystemPrompt.experto_creador))
+        .options(
+            selectinload(SystemPrompt.experto_creador),
+            selectinload(SystemPrompt.documentos_conocimiento),
+        )
         .where(SystemPrompt.id_prompt == id_prompt)
     )
     prompt_db = result.scalar_one_or_none()
@@ -202,7 +246,10 @@ async def delete_prompt(
     # Recargar con relación
     result = await session.execute(
         select(SystemPrompt)
-        .options(selectinload(SystemPrompt.experto_creador))
+        .options(
+            selectinload(SystemPrompt.experto_creador),
+            selectinload(SystemPrompt.documentos_conocimiento),
+        )
         .where(SystemPrompt.id_prompt == id_prompt)
     )
     prompt_db = result.scalar_one()
