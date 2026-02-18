@@ -19,18 +19,15 @@ def bolivia_now():
 # ==========================================
 class SystemPromptBase(SQLModel):
     nombre: str = Field(max_length=100)
-    contenido_instruccion: str = Field(default="", description="El prompt del sistema o instrucción para la IA")
     es_activo: bool = Field(default=True)
     descripcion: Optional[str] = Field(default=None, max_length=500)
-    resumen_logica: Optional[str] = Field(default=None)
     contenido_rol: Optional[str] = Field(default=None)
     contenido_tarea: Optional[str] = Field(default=None)
     contenido_alcances: Optional[str] = Field(default=None)
     contenido_contexto: Optional[str] = Field(default=None)
     temperatura: float = Field(default=0.7)
     top_p: float = Field(default=0.95)
-    penalizacion_frecuencia: float = Field(default=0.0)
-    tokens_maximos: int = Field(default=2048)
+    top_k: int = Field(default=20)
 
 # ==========================================
 # 2. CLASE TABLE (Base de Datos)
@@ -82,16 +79,13 @@ class SystemPromptCreate(SystemPromptBase):
 # ==========================================
 class SystemPromptUpdate(SQLModel):
     nombre: Optional[str] = None
-    contenido_instruccion: Optional[str] = None
     es_activo: Optional[bool] = None
     descripcion: Optional[str] = None
-    resumen_logica: Optional[str] = None
     contenido_rol: Optional[str] = None
     contenido_tarea: Optional[str] = None
     contenido_alcances: Optional[str] = None
     contenido_contexto: Optional[str] = None
     temperatura: Optional[float] = None
     top_p: Optional[float] = None
-    penalizacion_frecuencia: Optional[float] = None
-    tokens_maximos: Optional[int] = None
+    top_k: Optional[int] = None
     documentos_conocimiento: Optional[List[int]] = None
