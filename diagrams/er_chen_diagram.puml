@@ -52,17 +52,6 @@ entity "CASO" as CASO {
     fecha_actualizacion
 }
 
-entity "DOCUMENTO" as DOC {
-    * **id_documento** <<PK>>
-    --
-    caso_id                   <<FK>>
-    nombre_archivo
-    ruta
-    tipo_documento
-    tipo_mime
-    hash_verificacion
-    fecha_subida
-}
 
 entity "USUARIO_ACTION_LINK" as UAL {
     * **id** <<PK>>
@@ -136,7 +125,6 @@ entity "DOCUMENTO_CONOCIMIENTO" as DOCCON {
 '  Fila 1 (izq → der): ROL · USUARIO · CASO · DOC
 ROL     -[hidden]r-> USUARIO
 USUARIO -[hidden]r-> CASO
-CASO    -[hidden]r-> DOC
 
 '  Fila 2: UAL (bajo USUARIO) · CHAT (bajo CASO)
 USUARIO -[hidden]d-> UAL
@@ -170,8 +158,6 @@ USUARIO ||--o{ DOCCON           : "sube"
 ' USUARIO 1:N SYSTEM_PROMPT
 USUARIO ||--o{ PROMPT           : "crea"
 
-' CASO 1:N DOCUMENTO
-CASO    ||--o{ DOC              : "contiene"
 
 ' CASO 1:N CHAT_SESSION
 CASO    ||--o{ CHAT             : "genera"

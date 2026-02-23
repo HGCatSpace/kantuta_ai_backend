@@ -53,6 +53,8 @@ class DocumentoConocimiento(DocumentoConocimientoBase, table=True):
 
     # Ubicación física en el servidor
     ruta: str
+    # Nombre original del archivo (sin prefijo de timestamp)
+    nombre_archivo: Optional[str] = Field(default=None)
 
     # --- RELACIÓN CON USUARIO (1:N) ---
     usuario_id: int = Field(foreign_key="usuarios.id")
@@ -96,3 +98,4 @@ class DocumentoConocimientoPublic(DocumentoConocimientoBase):
     estado_indexacion: EnumEstadoIndexacion
     fecha_creacion: datetime
     ultima_modificacion: datetime
+    nombre_archivo: Optional[str] = None

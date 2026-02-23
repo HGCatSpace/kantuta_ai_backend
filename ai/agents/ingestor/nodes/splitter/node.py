@@ -44,8 +44,13 @@ def text_splitter_node(state: IngestionState) -> dict:
         strip_whitespace=True
     )
     
+    MIN_CHUNK_LENGTH = 120  # chars mínimos para que un fragmento sea útil
+
     new_chunks = text_splitter.split_documents(raw_docs)
-    
+
+    # Descarta fragmentos que solo contienen encabezados estructurales (LIBRO, TÍTULO, etc.)
+    new_chunks = [c for c in new_chunks if len(c.page_content.strip()) >= MIN_CHUNK_LENGTH]
+
     for i, chunk in enumerate(new_chunks):
         chunk.metadata["chunk_index"] = i
 

@@ -88,6 +88,8 @@ def _load_file_sync(file_path: str, source_filename: str) -> List[Document]:
 
 
 # ─── 2. Split ───
+MIN_CHUNK_LENGTH = 120  # chars mínimos para que un fragmento sea útil
+
 def _split_documents(docs: List[Document]) -> List[Document]:
     """Fragmenta documentos usando los separadores legales."""
     splitter = RecursiveCharacterTextSplitter(
@@ -99,6 +101,10 @@ def _split_documents(docs: List[Document]) -> List[Document]:
         strip_whitespace=True,
     )
     chunks = splitter.split_documents(docs)
+
+    # Descarta fragmentos que solo contienen encabezados estructurales (LIBRO, TÍTULO, etc.)
+    chunks = [c for c in chunks if len(c.page_content.strip()) >= MIN_CHUNK_LENGTH]
+
     for i, chunk in enumerate(chunks):
         chunk.metadata["chunk_index"] = i
     return chunks
