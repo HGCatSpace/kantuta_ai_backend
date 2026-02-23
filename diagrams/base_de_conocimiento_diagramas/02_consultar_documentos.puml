@@ -1,0 +1,45 @@
+@startuml
+title Base de Conocimiento — KANTUTA AI
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Usuario Autenticado"         as FE
+participant "FastAPI\n/conocimiento"      as API
+participant "JWT\n(get_current_user)"     as JWT
+participant "AsyncSession\n(PostgreSQL)"  as DB
+
+' ──────────────────────────────────────────
+== Consultar Documentos ==
+' ──────────────────────────────────────────
+
+
+FE  -> API : GET /conocimiento/\n?search=&categoria=&offset=&limit=
+note over API : Este endpoint NO requiere\nautenticación.
+API -> DB  : SELECT documentos_conocimiento\n+ WHERE titulo/descripcion/etiquetas ILIKE search\n+ WHERE categoria = categoria\n+ ORDER BY fecha_creacion DESC\n+ OFFSET/LIMIT
+DB --> API  : List[DocumentoConocimiento]
+API --> FE  : 200 List[DocumentoConocimientoPublic]
+
+
+FE  -> API : GET /conocimiento/count  [Bearer token]\n?search=&categoria=
+API -> JWT : get_current_user(token)
+JWT --> API : Usuario autenticado
+API -> DB  : SELECT COUNT(*) FROM documentos_conocimiento\n+ mismos filtros
+DB --> API  : total: int
+API --> FE  : 200 { total }
+
+== Obtener por ID ==
+
+FE  -> API : GET /conocimiento/{doc_id}  [Bearer token]
+API -> JWT : get_current_user(token)
+JWT --> API : Usuario autenticado
+API -> DB  : session.get(DocumentoConocimiento, doc_id)
+alt Documento no encontrado
+    DB --> API : None
+    API --> FE : 404
+else
+    DB --> API : DocumentoConocimiento
+    API --> FE : 200 DocumentoConocimientoPublic
+end
+
+@enduml

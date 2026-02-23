@@ -95,6 +95,7 @@ async def create_documento(
         extra_meta = {
             "titulo": titulo,
             "categoria": str(categoria.value) if categoria else "Otros",
+            "documento_id": new_doc.id_documento,
         }
 
         doc_id = new_doc.id_documento

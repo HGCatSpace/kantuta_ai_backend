@@ -105,14 +105,6 @@ def _split_documents(docs: List[Document]) -> List[Document]:
 
 
 # ─── 3. Enrich + Store ───
-def _enrich_chunks(chunks: List[Document]) -> None:
-    """Enriquece los fragmentos con información del origen (in-place)."""
-    for chunk in chunks:
-        filename = chunk.metadata.get("source_filename", "Desconocido")
-        if "Documento Fuente:" not in chunk.page_content:
-            chunk.page_content = (
-                f"Documento Fuente: {filename}\nContenido Legal:\n{chunk.page_content}"
-            )
 
 
 # ─── Public API ───
@@ -137,8 +129,6 @@ async def ingest_file(file_path: str, source_filename: str, extra_metadata: dict
     chunks = await asyncio.to_thread(_split_documents, docs)
     print(f"   ✂️  {len(chunks)} fragmentos generados")
 
-    # Enrich
-    _enrich_chunks(chunks)
 
     # Store
     vector_store = await asyncio.to_thread(_get_vector_store)

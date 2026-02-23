@@ -25,7 +25,7 @@ services:
       volumes:
         - chroma_data:/chroma/chroma # Persistencia de vectores
       ports:
-        - "8000:8000" # Puerto API estándar de Chroma
+        - "8000:8000" 
       environment:
         - IS_PERSISTENT=TRUE
         - ANONYMIZED_TELEMETRY=FALSE

@@ -69,8 +69,27 @@ async def retrieve_node(state: RetrievalState):
         vector_store = await asyncio.to_thread(_get_retriever_sync)
         
         # 2. Búsqueda Asíncrona
+        # Filtrado por metadatos si existen document_ids
+        filter_criteria = None
+        document_ids = state.get("document_ids", [])
+
+        # Si no hay documentos seleccionados, asumimos Búsqueda Global (no se aplica filtro)
+        if document_ids:
+            # ChromaDB espera un dict para el filtro: {"field": {"$in": [val1, val2]}}
+            print(f"   🔍 [RETRIEVAL] Filtrando por documento_ids: {document_ids}")
+            if len(document_ids) == 1:
+                filter_criteria = {"documento_id": document_ids[0]}
+            else:
+                filter_criteria = {"documento_id": {"$in": document_ids}}
+        else:
+            print("   🌍 [RETRIEVAL] Sin filtro de documentos (Búsqueda Global)")
+
         # Usamos asimilarity_search_with_score que es nativo async de LangChain
-        results = await vector_store.asimilarity_search_with_score(query, k=5)
+        results = await vector_store.asimilarity_search_with_score(
+            query, 
+            k=5,
+            filter=filter_criteria
+        )
         
         print(f"📄 [RETRIEVAL] Encontrados {len(results)} documentos.")
         

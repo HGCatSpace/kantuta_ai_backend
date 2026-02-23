@@ -10,6 +10,7 @@ from db import get_session
 from models.casos import Caso, CasoCreate, CasoUpdate, EstadoCaso
 from models.documentos import Documento
 from models.user import Usuario
+from app.core.deps import get_current_user
 
 
 # --- DTO para detalle de caso (NO toca el modelo de BD) ---
@@ -66,24 +67,26 @@ async def create_caso(
 async def read_casos(
     offset: int = Query(0, description="Casos a omitir"), 
     limit: int = Query(10, description="Número de casos"), 
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_user: Usuario = Depends(get_current_user)
 ):
     """
     Lista todos los casos del sistema (Paginado).
     """
-    statement = select(Caso).offset(offset).limit(limit)
+    statement = select(Caso).where(Caso.usuario_id == current_user.id).offset(offset).limit(limit)
     result = await session.execute(statement)
     return result.scalars().all()
 
 # --- 2.1 ÚLTIMOS 5 CASOS MODIFICADOS (GET) ---
 @router.get("/recent", response_model=List[Caso])
 async def read_recent_casos(
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Retorna los 5 casos más recientemente actualizados.
+    Retorna los 5 casos más recientemente actualizados del usuario autenticado.
     """
-    statement = select(Caso).where(Caso.estado == EstadoCaso.ABIERTO).order_by(Caso.fecha_actualizacion.desc()).limit(5)
+    statement = select(Caso).where(Caso.usuario_id == current_user.id, Caso.estado == EstadoCaso.ABIERTO).order_by(Caso.fecha_actualizacion.desc()).limit(5)
     result = await session.execute(statement)
     return result.scalars().all()
 

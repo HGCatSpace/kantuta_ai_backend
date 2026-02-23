@@ -11,6 +11,7 @@ from langchain_core.messages import BaseMessage, message_to_dict, HumanMessage
 from langchain_core.documents import Document
 # Importamos el BUILDER de tu agente
 from ai.agents.conversational_assistant.agent import builder 
+from models.system_prompt import SystemPrompt
 
 router = APIRouter(
     prefix="/chat-agent",
@@ -20,6 +21,7 @@ router = APIRouter(
 # --- Schema Local ---
 class UserMessage(BaseModel):
     content: str
+    system_prompt: dict | None = None # Recibir datos del prompt dinámicamente
 
 # --- Helper Fecha ---
 def bolivia_now():
@@ -99,6 +101,15 @@ async def general_chat_state(
             clean_state[key] = [
                 {"page_content": doc.page_content, "metadata": doc.metadata}
                 for doc in value
+            ]
+        elif isinstance(value, list) and value and isinstance(value[0], (list, tuple)) and len(value[0]) == 2 and isinstance(value[0][0], Document):
+            # Caso RAG con scores: List[Tuple[Document, float]]
+            clean_state[key] = [
+                {
+                    "document": {"page_content": item[0].page_content, "metadata": item[0].metadata},
+                    "score": item[1]
+                }
+                for item in value
             ]
         else:
             clean_state[key] = value
@@ -224,6 +235,7 @@ async def chat_with_agent(
     }
 
 
+
 # ==================================================
 # STREAMING — Session-based
 # ==================================================
@@ -252,10 +264,55 @@ async def stream_chat_with_agent(
     config = {"configurable": {"thread_id": session_id}}
     human_message = HumanMessage(content=user_msg.content)
 
+    # Preparar el estado inicial con overrides del system prompt si existen
+    input_state = {"messages": human_message}
+    
+    if user_msg.system_prompt:
+        sp: SystemPrompt = user_msg.system_prompt
+        # Mapear campos del fr
+        # ontend a llaves del State
+
+        # contenido_rol: Optional[str] = None
+        # contenido_tarea: Optional[str] = None
+        # contenido_alcances: Optional[str] = None
+        # contenido_contexto: Optional[str] = None
+
+        contenido_instruccion = ""
+        if "contenido_rol" in sp:
+            contenido_instruccion += f"<rol> {sp['contenido_rol']} </rol>\n"
+        if "contenido_tarea" in sp:
+            contenido_instruccion += f"<tarea> {sp['contenido_tarea']} </tarea>\n"
+        if "contenido_alcances" in sp:
+            contenido_instruccion += f"<alcances> {sp['contenido_alcances']} </alcances>\n"
+        if "contenido_contexto" in sp:
+            contenido_instruccion += f"<contexto> {sp['contenido_contexto']} </contexto>\n"
+
+        doc_id_filter = []
+        if "documentos_conocimiento" in sp:
+            doc_id_filter = sp["documentos_conocimiento"]
+
+
+        input_state["content_instruction"] = contenido_instruccion
+        if "temperatura" in sp:
+            input_state["temperature"] = sp["temperatura"]
+        if "top_p" in sp:
+            input_state["top_p"] = sp["top_p"]
+        if "top_k" in sp:
+            input_state["top_k"] = sp["top_k"]
+        if "documentos_conocimiento" in sp:
+            input_state["document_ids"] = sp["documentos_conocimiento"]
+        else:
+            # Si el prompt no tiene documentos, asumimos lista vacía (No RAG)
+            # Esto evita que se quede con los IDs de una configuración anterior si el usuario los quitó
+            input_state["document_ids"] = []
+
+        for key, content in input_state.items():
+            print(f"|----------------------Key: {key}, Content: {content}")
+
     async def event_generator():
         try:
             async for event in agent_with_memory.astream_events(
-                {"messages": human_message}, config=config, version="v2"
+                input_state, config=config, version="v2"
             ):
                 kind = event.get("event")
                 if kind == "on_chat_model_stream":
@@ -332,8 +389,18 @@ async def get_agent_state(
                 {"page_content": doc.page_content, "metadata": doc.metadata} 
                 for doc in value
             ]
+
+        # C. Si es una lista de Tuplas (Documento, Score)
+        elif isinstance(value, list) and value and isinstance(value[0], (list, tuple)) and len(value[0]) == 2 and isinstance(value[0][0], Document):
+            clean_state[key] = [
+                {
+                    "document": {"page_content": item[0].page_content, "metadata": item[0].metadata},
+                    "score": item[1]
+                }
+                for item in value
+            ]
             
-        # C. Si es un objeto simple (str, int, dict, bool) se pasa directo
+        # D. Si es un objeto simple (str, int, dict, bool) se pasa directo
         else:
             clean_state[key] = value
 

@@ -1,0 +1,31 @@
+@startuml
+title Base de Conocimiento — KANTUTA AI
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Usuario Autenticado"        as FE
+participant "FastAPI\n/conocimiento"     as API
+participant "JWT\n(get_current_user)"    as JWT
+participant "AsyncSession\n(PostgreSQL)" as DB
+
+' ──────────────────────────────────────────
+== Actualizar Documento ==
+' ──────────────────────────────────────────
+
+FE  -> API : PATCH /conocimiento/{doc_id}  [Bearer token]\n{ titulo?, descripcion?, categoria?,\netiquetas?, es_activo? }
+API -> JWT : get_current_user(token)
+JWT --> API : Usuario autenticado
+API -> DB  : session.get(DocumentoConocimiento, doc_id)
+
+alt Documento no encontrado
+    DB --> API : None
+    API --> FE : 404
+else
+    note over API : Solo actualiza metadatos.\nNo re-indexa el contenido en ChromaDB.
+    API -> DB  : sqlmodel_update(campos)\nultima_modificacion = bolivia_now()\ncommit() · refresh()
+    DB --> API : DocumentoConocimiento actualizado
+    API --> FE : 200 DocumentoConocimientoPublic
+end
+
+@enduml

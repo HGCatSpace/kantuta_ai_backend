@@ -1,0 +1,45 @@
+@startuml
+title Base de Conocimiento — KANTUTA AI
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Usuario Autenticado"        as FE
+participant "FastAPI\n/conocimiento"     as API
+participant "JWT\n(get_current_user)"    as JWT
+participant "AsyncSession\n(PostgreSQL)" as DB
+participant "Servicio\nIngestion"        as SVC
+participant "ChromaDB\nkantuta_legal"    as CHROMA
+participant "Disco\ndata/loaded/"        as DISK
+
+' ──────────────────────────────────────────
+== Eliminar Documento ==
+' ──────────────────────────────────────────
+
+FE  -> API : DELETE /conocimiento/{doc_id}  [Bearer token]
+API -> JWT : get_current_user(token)
+JWT --> API : Usuario autenticado
+API -> DB  : session.get(DocumentoConocimiento, doc_id)
+
+alt Documento no encontrado
+    DB --> API : None
+    API --> FE : 404
+else
+    note over API : Hard Delete:\nElimina chunks, archivo físico\ny registro en BD.
+
+    API -> SVC    : delete_file_chunks(source_filename)
+    SVC -> CHROMA : Buscar chunks WHERE\nsource_filename = ruta
+    CHROMA --> SVC : IDs encontrados
+    SVC -> CHROMA : Eliminar chunks
+    CHROMA --> SVC : OK
+
+    API -> DISK : Path(doc.ruta).unlink()
+    DISK --> API : Archivo eliminado
+
+    API -> DB   : session.delete(doc_db)\ncommit()
+    DB --> API  : OK
+
+    API --> FE  : 204 No Content
+end
+
+@enduml

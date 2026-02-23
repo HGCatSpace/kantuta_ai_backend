@@ -1,0 +1,152 @@
+@startuml
+title Gestión de Casos Legales — KANTUTA AI\n[1/5] Crear Caso
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Cliente / Frontend"         as FE
+participant "FastAPI\n/casos"            as API
+participant "AsyncSession\n(PostgreSQL)" as DB
+
+FE  -> API : POST /casos/\n{ titulo, descripcion, usuario_id }
+API -> DB  : session.get(Usuario, usuario_id)
+alt Usuario no existe
+    DB --> API : None
+    API --> FE : 404 "El usuario especificado no existe"
+else Usuario existe
+    DB --> API : Usuario
+    API -> DB  : session.add(Caso)\ncommit() · refresh()
+    DB --> API : Caso { id_caso, estado=ABIERTO, fechas }
+    API --> FE : 201 Caso
+end
+
+@enduml
+
+' ──────────────────────────────────────────
+
+@startuml
+title Gestión de Casos Legales — KANTUTA AI\n[2/5] Consultar Casos
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Cliente / Frontend"         as FE
+participant "FastAPI\n/casos"            as API
+participant "AsyncSession\n(PostgreSQL)" as DB
+
+FE  -> API : GET /casos/?offset&limit
+API -> DB  : SELECT casos OFFSET/LIMIT
+DB  --> API : List[Caso]
+API --> FE  : 200 List[Caso]
+
+FE  -> API : GET /casos/recent
+API -> DB  : SELECT casos WHERE estado=ABIERTO\nORDER BY fecha_actualizacion DESC LIMIT 5
+DB  --> API : List[Caso]
+API --> FE  : 200 List[Caso]
+
+FE  -> API : GET /casos/usuario/{usuario_id}
+API -> DB  : SELECT usuario WHERE id = usuario_id
+alt Usuario no encontrado
+    DB --> API : None
+    API --> FE : 404
+else
+    API -> DB  : SELECT casos WHERE usuario_id = id
+    DB --> API : List[Caso]
+    API --> FE : 200 List[Caso]
+end
+
+FE  -> API : GET /casos/{id_caso}
+API -> DB  : session.get(Caso, id_caso)
+alt Caso no encontrado
+    DB --> API : None
+    API --> FE : 404
+else
+    DB --> API : Caso
+    API --> FE : 200 Caso
+end
+
+FE  -> API : GET /casos/{id_caso}/detail
+API -> DB  : session.get(Caso, id_caso)
+API -> DB  : COUNT(documentos) WHERE caso_id = id_caso
+DB  --> API : Caso + total_documentos
+API --> FE  : 200 CasoDetail\n{ ...Caso, total_documentos }
+
+@enduml
+
+' ──────────────────────────────────────────
+
+@startuml
+title Gestión de Casos Legales — KANTUTA AI\n[3/5] Actualizar Caso
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Cliente / Frontend"         as FE
+participant "FastAPI\n/casos"            as API
+participant "AsyncSession\n(PostgreSQL)" as DB
+
+FE  -> API : PATCH /casos/{id_caso}\n{ titulo?, descripcion?, estado? }
+API -> DB  : session.get(Caso, id_caso)
+alt Caso no existe
+    DB --> API : None
+    API --> FE : 404
+else
+    API -> DB  : sqlmodel_update(data)\nfecha_actualizacion = bolivia_now()\ncommit() · refresh()
+    DB --> API : Caso actualizado
+    API --> FE : 200 Caso
+end
+
+@enduml
+
+' ──────────────────────────────────────────
+
+@startuml
+title Gestión de Casos Legales — KANTUTA AI\n[4/5] Archivar Caso
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Cliente / Frontend"         as FE
+participant "FastAPI\n/casos"            as API
+participant "AsyncSession\n(PostgreSQL)" as DB
+
+FE  -> API : DELETE /casos/{id_caso}
+API -> DB  : session.get(Caso, id_caso)
+alt Caso no existe
+    DB --> API : None
+    API --> FE : 404
+else
+    note over API : Soft Delete:\nNo elimina el registro.\nCambia estado → ARCHIVADO.
+    API -> DB  : caso.estado = ARCHIVADO\nfecha_actualizacion = bolivia_now()\ncommit() · refresh()
+    DB --> API : Caso archivado
+    API --> FE : 200 Caso (estado=ARCHIVADO)
+end
+
+@enduml
+
+' ──────────────────────────────────────────
+
+@startuml
+title Gestión de Casos Legales — KANTUTA AI\n[5/5] Chat sobre un Caso
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Cliente / Frontend"         as FE
+participant "FastAPI\n/chats"            as CHAT
+participant "FastAPI\n/chat-agent"       as AGENT
+participant "AsyncSession\n(PostgreSQL)" as DB
+participant "LangGraph\nAgent"           as LG
+
+FE   -> CHAT : POST /chats/\n{ caso_id, titulo, system_prompt_id? }
+CHAT -> DB   : INSERT ChatSession\n(id_session=UUID, caso_id)
+DB  --> CHAT : ChatSession { id_session }
+CHAT --> FE  : 201 ChatSession
+
+FE   -> AGENT : POST /chat-agent/general/message\n{ message, thread_id=id_session }
+AGENT -> LG   : ainvoke({ messages },\nconfig={ thread_id })
+LG   -> LG    : retrieve_node → generate_node
+LG  --> AGENT : respuesta del LLM
+AGENT --> FE  : 200 { respuesta, thread_id }
+
+@enduml

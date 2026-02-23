@@ -1,0 +1,187 @@
+@startuml Gestión de Roles y Accesos
+
+title Gestión de Roles y Accesos — KANTUTA AI
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Admin / Frontend"           as FE
+participant "FastAPI\n/token"            as AUTH
+participant "FastAPI\n/users"            as USERS
+participant "FastAPI\n/roles"            as ROLES
+participant "FastAPI\n/actions"          as ACTIONS
+participant "AsyncSession\n(PostgreSQL)" as DB
+participant "JWT\n(security.py)"         as JWT
+
+' ' ──────────────────────────────────────────
+' == Autenticación ==
+' ' ──────────────────────────────────────────
+
+' FE   -> AUTH : POST /token\n{ username, password }
+' AUTH -> DB   : SELECT usuario WHERE\nemail=username OR nombre_de_usuario=username\n+ selectinload(rol, actions)
+' DB  --> AUTH : Usuario | None
+' alt Credenciales inválidas o usuario inactivo
+'     AUTH --> FE : 401 Unauthorized
+' else Credenciales correctas
+'     AUTH -> JWT  : verify_password(plain, hash)
+'     JWT --> AUTH : True
+'     AUTH -> JWT  : create_access_token\n({ sub: user.id, rol: id_rol })
+'     JWT --> AUTH : JWT (30 días)
+'     AUTH --> FE  : 200 { access_token, token_type,\nuser_data { nombre, email,\nrol_nombre, actions[] } }
+' end
+
+' ' ──────────────────────────────────────────
+' == Gestión de Usuarios ==
+' ' ──────────────────────────────────────────
+
+' FE    -> USERS : POST /users/\n{ nombre_de_usuario, email, password, id_rol }
+' USERS -> USERS : argon2.hash(password)
+' USERS -> DB    : INSERT Usuario\n(password=hash)
+' DB   --> USERS : Usuario { id, ... }
+' USERS --> FE   : 201 Usuario
+
+' ' ──────────────────────────────────────────
+' == Listar Usuarios ==
+' ' ──────────────────────────────────────────
+
+' FE    -> USERS : GET /users/\n?offset&limit
+' USERS -> DB    : SELECT usuarios\n+ selectinload(rol, actions)
+' DB   --> USERS : List[Usuario]
+' USERS --> FE   : 200 List[Usuario]
+
+' ' ──────────────────────────────────────────
+' == Obtenición de datos propios ==
+' ' ──────────────────────────────────────────
+
+' FE    -> USERS : GET /users/me\n[Bearer token]
+' USERS -> DB    : SELECT usuario WHERE id=token.sub\n+ selectinload(rol, actions)
+' DB   --> USERS : Usuario con relaciones
+' USERS --> FE   : 200 Usuario
+
+' FE    -> USERS : GET /users/dashboard\n[Bearer token]
+' USERS -> DB    : SELECT usuario WHERE id=token.sub\n+ selectinload(rol, casos, documentos_conocimiento)
+' DB   --> USERS : Usuario con relaciones
+' USERS --> FE   : 200 { nombre_completo, rol, casos_activos,\ndocumentos_recientes, ultimo_acceso }
+' @enduml
+
+' ' ──────────────────────────────────────────
+' == Actualizar Usuario ==
+' ' ──────────────────────────────────────────
+
+' FE    -> USERS : PATCH /users/{user_id}\n{ campos a modificar }
+' USERS -> DB    : SELECT usuario WHERE id=user_id
+' alt Usuario no encontrado
+'     DB --> USERS : None
+'     USERS --> FE : 404
+' else
+'     note over USERS : Si viene password,\nse hashea antes de guardar.
+'     USERS -> DB   : sqlmodel_update(data)\nfecha_ultima_modificacion = bolivia_now()\ncommit() · refresh()
+'     DB    --> USERS : Usuario actualizado
+'     USERS --> FE   : 200 Usuario
+' end
+
+' ' ──────────────────────────────────────────
+' == Inactivar Usuario ==
+' ' ──────────────────────────────────────────
+
+' FE    -> USERS : DELETE /users/{user_id}
+' USERS -> DB    : SELECT usuario WHERE id=user_id
+' alt Usuario no encontrado
+'     DB --> USERS : None
+'     USERS --> FE : 404
+' else
+'     note over USERS : Soft Delete:\nNo elimina el registro.
+'     USERS -> DB   : usuario.activo = "inactive"\ncommit() · refresh()
+'     DB    --> USERS : Usuario inactivo
+'     USERS --> FE   : 200 Usuario (activo=inactive)
+' end
+
+'  ' ──────────────────────────────────────────
+'  == Gestión de Roles ==
+'  ' ──────────────────────────────────────────
+
+'  FE    -> ROLES : POST /roles/\n{ nombre, description }
+'  ROLES -> DB    : INSERT Rol
+'  DB   --> ROLES : Rol { id_rol }
+'  ROLES --> FE   : 201 Rol
+
+'  FE    -> ROLES : GET /roles/
+'  ROLES -> DB    : SELECT roles
+'  DB   --> ROLES : List[Rol]
+'  ROLES --> FE   : 200 List[Rol]
+
+'  FE    -> ROLES : PATCH /roles/{id_rol}\n{ nombre?, description? }
+'  ROLES -> DB    : SELECT rol WHERE id_rol=id
+'  alt Rol no encontrado
+'      DB --> ROLES : None
+'      ROLES --> FE : 404
+'  else
+'      ROLES -> DB   : sqlmodel_update(data)\ncommit() · refresh()
+'      DB    --> ROLES : Rol actualizado
+'      ROLES --> FE   : 200 Rol
+'  end
+
+
+'  ' ──────────────────────────────────────────
+'  == Gestión de Acciones ==
+'  ' ──────────────────────────────────────────
+
+'  FE      -> ACTIONS : POST /actions/\n{ nombre, descripcion }
+'  ACTIONS -> DB      : INSERT Action
+'  DB     --> ACTIONS : Action { id_action }
+'  ACTIONS --> FE     : 201 Action
+
+'  FE      -> ACTIONS : GET /actions/
+'  ACTIONS -> DB      : SELECT actions
+'  DB     --> ACTIONS : List[Action]
+'  ACTIONS --> FE     : 200 List[Action]
+
+'  FE      -> ACTIONS : PUT /actions/{id_action}\n{ nombre, descripcion }
+'  ACTIONS -> DB      : SELECT action WHERE id_action=id
+'  alt Acción no encontrada
+'      DB --> ACTIONS : None
+'      ACTIONS --> FE : 404
+'  else
+'      note over ACTIONS : PUT reemplaza TODOS\nlos campos (no parcial).
+'      ACTIONS -> DB   : sqlmodel_update(data)\ncommit() · refresh()
+'      DB      --> ACTIONS : Action actualizada
+'      ACTIONS --> FE   : 200 Action
+'  end
+
+ ' ──────────────────────────────────────────
+ == Asignación de Acciones a Usuario (N:N) ==
+ ' ──────────────────────────────────────────
+
+ FE    -> USERS : GET /users/{user_id}/actions
+ USERS -> DB    : SELECT usuario + selectinload(actions)
+ DB   --> USERS : List[Action]
+ USERS --> FE   : 200 List[Action]
+
+ FE    -> USERS : POST /users/{user_id}/actions/{action_id}
+ USERS -> DB    : session.get(Usuario, user_id)\nsession.get(Action, action_id)
+ alt Usuario o Acción no existen
+     DB --> USERS : None
+     USERS --> FE : 404
+ else
+     USERS -> DB : SELECT UsuarioActionLink\nWHERE usuario_id=id AND action_id=id
+     alt Vínculo ya existe
+         DB --> USERS : Link existente
+         USERS --> FE : 409 Conflict
+     else
+         USERS -> DB   : INSERT UsuarioActionLink\n(usuario_id, action_id)\ncommit()
+         DB    --> USERS : OK
+         USERS --> FE   : 200 { message: "Acción asignada" }
+     end
+ end
+
+ FE    -> USERS : DELETE /users/{user_id}/actions/{action_id}
+ USERS -> DB    : SELECT UsuarioActionLink\nWHERE usuario_id=id AND action_id=id
+ alt Vínculo no existe
+     DB --> USERS : None
+     USERS --> FE : 404
+ else
+     USERS -> DB   : session.delete(link)\ncommit()
+     DB    --> USERS : OK
+     USERS --> FE   : 200 { message: "Acción removida" }
+ end
+@enduml

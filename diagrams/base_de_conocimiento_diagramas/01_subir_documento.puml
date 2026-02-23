@@ -1,0 +1,54 @@
+@startuml
+title Base de Conocimiento — KANTUTA AI\n
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Usuario Autenticado"         as FE
+participant "FastAPI\n/conocimiento"      as API
+participant "JWT\n(get_current_user)"     as JWT
+participant "Disco\ndata/loaded/"         as DISK
+participant "AsyncSession\n(PostgreSQL)"  as DB
+participant "Servicio\nIngestion"         as SVC
+participant "ChromaDB\nkantuta_legal"     as CHROMA
+
+' ──────────────────────────────────────────
+== Subir Documento ==
+' ──────────────────────────────────────────
+
+FE  -> API  : POST /conocimiento/  [Bearer token]\nmultipart/form-data\n{ archivo, titulo, categoria,\ndescripcion?, etiquetas? }
+
+API -> JWT  : get_current_user(token)
+JWT --> API : Usuario autenticado
+
+API -> DISK : Guardar archivo\n{timestamp}_{nombre_original}
+DISK --> API : file_path
+
+API -> API  : _detect_icono(filename)\n→ PDF | DOC | OTHER
+
+API -> DB   : INSERT DocumentoConocimiento\n{ titulo, categoria, icono, ruta,\nusuario_id=current_user.id,\nestado_indexacion=PROCESANDO }
+DB --> API  : DocumentoConocimiento { id_documento }
+
+note over API : Responde inmediatamente.\nLa indexación ocurre en background.
+
+API --> FE  : 201 DocumentoConocimientoPublic\n(estado_indexacion=PROCESANDO)
+
+== Tarea en Background (asyncio.create_task) ==
+
+API -> SVC  : ingest_file(file_path,\nnombre_original, extra_meta)
+SVC -> DISK : Leer archivo\n(asyncio.to_thread)
+DISK --> SVC : Contenido
+
+SVC -> SVC  : RecursiveCharacterTextSplitter\nseparadores legales bolivianos\nchunk_size=800, overlap=50
+SVC -> CHROMA : aadd_documents(chunks)
+CHROMA --> SVC : IDs de vectores
+
+alt Indexación exitosa
+    SVC --> API : count chunks indexados
+    API -> DB   : estado_indexacion = COMPLETADO\ncommit()
+else Error en indexación
+    SVC --> API : Exception
+    API -> DB   : estado_indexacion = ERROR\ncommit()
+end
+
+@enduml

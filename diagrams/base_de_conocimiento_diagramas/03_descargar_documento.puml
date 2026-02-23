@@ -1,0 +1,37 @@
+@startuml
+title Base de Conocimiento — KANTUTA AI
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Usuario Autenticado"        as FE
+participant "FastAPI\n/conocimiento"     as API
+participant "JWT\n(get_current_user)"    as JWT
+participant "AsyncSession\n(PostgreSQL)" as DB
+participant "Disco\ndata/loaded/"        as DISK
+
+' ──────────────────────────────────────────
+== Descargar Documento ==
+' ──────────────────────────────────────────
+
+FE  -> API  : GET /conocimiento/{doc_id}/download  [Bearer token]
+API -> JWT  : get_current_user(token)
+JWT --> API : Usuario autenticado
+API -> DB   : session.get(DocumentoConocimiento, doc_id)
+
+alt Documento no encontrado en BD
+    DB --> API : None
+    API --> FE : 404 "Documento no encontrado"
+else
+    DB --> API : DocumentoConocimiento { ruta }
+    API -> DISK : Verificar Path(doc.ruta).exists()
+    alt Archivo no existe en disco
+        DISK --> API : False
+        API --> FE   : 404 "Archivo no encontrado en el servidor"
+    else Archivo existe
+        DISK --> API : True
+        API --> FE   : FileResponse\n(archivo binario, filename=nombre_archivo)
+    end
+end
+
+@enduml

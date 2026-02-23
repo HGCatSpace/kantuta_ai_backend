@@ -1,0 +1,186 @@
+@startuml
+title Diagrama Entidad-Relación — KANTUTA AI
+
+left to right direction
+
+skinparam entity {
+    BackgroundColor #D6EAF8
+    BorderColor     #1A5276
+    FontStyle       Bold
+    FontSize        12
+}
+
+skinparam card {
+    BackgroundColor #FEF9E7
+    BorderColor     #9A7D0A
+    FontSize        11
+    FontStyle       Italic
+}
+
+' ═══════════════════════════════════════════════════════════════
+'  ENTIDADES
+' ═══════════════════════════════════════════════════════════════
+
+entity "ROL" as ROL {
+    * **id_rol** <<PK>>
+    --
+    nombre
+    description
+}
+
+entity "USUARIO" as USUARIO {
+    * **id** <<PK>>
+    --
+    id_rol                    <<FK>>
+    nombre_de_usuario
+    email
+    nombre_completo
+    password
+    activo
+    fecha_registro
+    fecha_ultima_modificacion
+}
+
+entity "CASO" as CASO {
+    * **id_caso** <<PK>>
+    --
+    usuario_id                <<FK>>
+    titulo
+    descripcion
+    estado
+    fecha_creacion
+    fecha_actualizacion
+}
+
+entity "DOCUMENTO" as DOC {
+    * **id_documento** <<PK>>
+    --
+    caso_id                   <<FK>>
+    nombre_archivo
+    ruta
+    tipo_documento
+    tipo_mime
+    hash_verificacion
+    fecha_subida
+}
+
+entity "USUARIO_ACTION_LINK" as UAL {
+    * **id** <<PK>>
+    --
+    usuario_id  <<FK>>
+    action_id   <<FK>>
+}
+
+entity "ACTION" as ACTION {
+    * **id_action** <<PK>>
+    --
+    nombre
+    descripcion
+}
+
+entity "CHAT_SESSION" as CHAT {
+    * **id_session** <<PK>>
+    --
+    caso_id                   <<FK>>
+    system_prompt_id          <<FK>>
+    titulo
+    es_activo
+    fecha_creacion
+    ultimo_acceso
+}
+
+entity "SYSTEM_PROMPT" as PROMPT {
+    * **id_prompt** <<PK>>
+    --
+    id_experto_creador        <<FK>>
+    nombre
+    es_activo
+    descripcion
+    contenido_rol
+    contenido_tarea
+    contenido_alcances
+    contenido_contexto
+    temperatura
+    top_p
+    top_k
+    fecha_creacion
+    fecha_actualizacion
+}
+
+entity "PROMPT_DOCUMENTO_LINK" as PDL {
+    * **id** <<PK>>
+    --
+    system_prompt_id          <<FK>>
+    documento_id              <<FK>>
+}
+
+entity "DOCUMENTO_CONOCIMIENTO" as DOCCON {
+    * **id_documento** <<PK>>
+    --
+    usuario_id                <<FK>>
+    titulo
+    categoria
+    icono
+    descripcion
+    ruta
+    nombre_archivo
+    estado_indexacion
+    fecha_creacion
+    ultima_modificacion
+}
+
+' ═══════════════════════════════════════════════════════════════
+'  LAYOUT — flechas ocultas para fijar posiciones
+' ═══════════════════════════════════════════════════════════════
+
+'  Fila 1 (izq → der): ROL · USUARIO · CASO · DOC
+ROL     -[hidden]r-> USUARIO
+USUARIO -[hidden]r-> CASO
+CASO    -[hidden]r-> DOC
+
+'  Fila 2: UAL (bajo USUARIO) · CHAT (bajo CASO)
+USUARIO -[hidden]d-> UAL
+CASO    -[hidden]d-> CHAT
+
+'  Fila 3: ACTION (bajo UAL) · PROMPT (bajo CHAT)
+UAL     -[hidden]d-> ACTION
+CHAT    -[hidden]d-> PROMPT
+
+'  Fila 3 (continuación): PDL · DOCCON a la derecha de PROMPT
+PROMPT  -[hidden]r-> PDL
+PDL     -[hidden]r-> DOCCON
+
+' ═══════════════════════════════════════════════════════════════
+'  RELACIONES + cardinalidad
+' ═══════════════════════════════════════════════════════════════
+
+' USUARIO N:1 ROL
+USUARIO }o--|| ROL              : "tiene"
+
+' USUARIO N:N ACTION (via UAL)
+USUARIO ||--o{ UAL              : "posee >"
+ACTION  ||--o{ UAL              : "< pertenece"
+
+' USUARIO 1:N CASO
+USUARIO ||--o{ CASO             : "registra"
+
+' USUARIO 1:N DOCUMENTO_CONOCIMIENTO
+USUARIO ||--o{ DOCCON           : "sube"
+
+' USUARIO 1:N SYSTEM_PROMPT
+USUARIO ||--o{ PROMPT           : "crea"
+
+' CASO 1:N DOCUMENTO
+CASO    ||--o{ DOC              : "contiene"
+
+' CASO 1:N CHAT_SESSION
+CASO    ||--o{ CHAT             : "genera"
+
+' CHAT_SESSION N:1 SYSTEM_PROMPT
+CHAT    }o--|| PROMPT           : "usa"
+
+' SYSTEM_PROMPT N:N DOCUMENTO_CONOCIMIENTO (via PDL)
+PROMPT  ||--o{ PDL              : "referencia >"
+DOCCON  ||--o{ PDL              : "< referenciado por"
+
+@enduml

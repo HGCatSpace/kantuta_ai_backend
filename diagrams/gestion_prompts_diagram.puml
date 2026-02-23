@@ -1,0 +1,115 @@
+@startuml Gestión de System Prompts
+
+title Gestión de System Prompts — KANTUTA AI
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor       "Usuario Autenticado"         as FE
+participant "FastAPI\n/prompts"           as API
+participant "AsyncSession\n(PostgreSQL)"  as DB
+participant "JWT\n(get_current_user)"     as JWT
+participant "FastAPI\n/chat-agent"        as CHAT
+
+' ' ──────────────────────────────────────────
+' == Crear Prompt ==
+' ' ──────────────────────────────────────────
+
+' FE  -> API : POST /prompts/  [Bearer token]\n{ nombre, descripcion, contenido_rol,\ncontenido_tarea, contenido_alcances,\ncontenido_contexto, temperatura,\ntop_p, top_k, documentos_conocimiento: [ids] }
+' API -> JWT : get_current_user(token)
+' JWT --> API : Usuario autenticado
+' API -> DB  : INSERT SystemPrompt\n(id_experto_creador = current_user.id)
+' DB --> API  : SystemPrompt { id_prompt }
+' note over API : Vincula documentos\nen PromptDocumentoLink
+' loop por cada doc_id en documentos_conocimiento
+'     API -> DB : INSERT PromptDocumentoLink\n(system_prompt_id, documento_id)
+' end
+' DB --> API  : Links creados
+' API -> DB   : SELECT SystemPrompt\n+ selectinload(experto_creador, documentos_conocimiento)
+' DB --> API  : SystemPrompt con relaciones
+' API --> FE  : 201 SystemPromptPublic\n{ id_prompt, nombre, nombre_creador,\ndocumentos_conocimiento: [ids], ... }
+
+' ' ──────────────────────────────────────────
+' == Consultar Prompts ==
+' ' ──────────────────────────────────────────
+
+' FE  -> API : GET /prompts/  [Bearer token]\n?search=&es_activo=&offset=&limit=
+' API -> JWT : get_current_user(token)
+' JWT --> API : Usuario autenticado
+' API -> DB  : SELECT system_prompts\n+ filtros (nombre ILIKE, es_activo)\n+ ORDER BY fecha_creacion DESC\n+ OFFSET/LIMIT\n+ selectinload(experto_creador, documentos_conocimiento)
+' DB --> API  : List[SystemPrompt]
+' API --> FE  : 200 List[SystemPromptPublic]
+
+' FE  -> API : GET /prompts/count  [Bearer token]\n?search=&es_activo=
+' API -> DB  : SELECT COUNT(*) FROM system_prompts\n+ mismos filtros
+' DB --> API  : total: int
+' API --> FE  : 200 { total }
+
+' FE  -> API : GET /prompts/{id_prompt}  [Bearer token]
+' API -> JWT : get_current_user(token)
+' JWT --> API : Usuario autenticado
+' API -> DB  : SELECT SystemPrompt WHERE id_prompt=id\n+ selectinload(experto_creador, documentos_conocimiento)
+' alt Prompt no encontrado
+'     DB --> API : None
+'     API --> FE : 404
+' else
+'     DB --> API  : SystemPrompt
+'     API --> FE  : 200 SystemPromptPublic
+' end
+
+' ' ──────────────────────────────────────────
+' == Actualizar Prompt ==
+' ' ──────────────────────────────────────────
+
+' FE  -> API : PATCH /prompts/{id_prompt}  [Bearer token]\n{ campos opcionales...\ndocumentos_conocimiento?: [ids] }
+' API -> JWT : get_current_user(token)
+' JWT --> API : Usuario autenticado
+' API -> DB  : SELECT SystemPrompt WHERE id_prompt=id
+' alt Prompt no encontrado
+'     DB --> API : None
+'     API --> FE : 404
+' else
+'     API -> DB  : sqlmodel_update(campos)\nfecha_actualizacion = bolivia_now()\ncommit() · refresh()
+'     alt documentos_conocimiento fue enviado
+'         note over API : Sincroniza la tabla\nde vínculos (reemplaza).
+'         API -> DB  : DELETE PromptDocumentoLink\nWHERE system_prompt_id = id
+'         loop por cada doc_id nuevo
+'             API -> DB : INSERT PromptDocumentoLink\n(system_prompt_id, doc_id)
+'         end
+'         API -> DB  : commit()
+'     end
+'     API -> DB  : SELECT SystemPrompt\n+ selectinload(experto_creador, documentos_conocimiento)
+'     DB --> API  : SystemPrompt actualizado
+'     API --> FE  : 200 SystemPromptPublic
+' end
+
+' ' ──────────────────────────────────────────
+' == Desactivar Prompt (Soft Delete) ==
+' ' ──────────────────────────────────────────
+
+' FE  -> API : DELETE /prompts/{id_prompt}  [Bearer token]
+' API -> JWT : get_current_user(token)
+' JWT --> API : Usuario autenticado
+' API -> DB  : SELECT SystemPrompt WHERE id_prompt=id\n+ selectinload(experto_creador, documentos_conocimiento)
+' alt Prompt no encontrado
+'     DB --> API : None
+'     API --> FE : 404
+' else
+'     note over API : Soft Delete:\nNo elimina el registro ni los vínculos.
+'     API -> DB  : prompt.es_activo = False\nfecha_actualizacion = bolivia_now()\ncommit() · refresh()
+'     API -> DB  : SELECT SystemPrompt (recarga con relaciones)
+'     DB --> API  : SystemPrompt inactivo
+'     API --> FE  : 200 SystemPromptPublic (es_activo=false)
+' end
+
+' ──────────────────────────────────────────
+== Uso del Prompt en Chat ==
+' ──────────────────────────────────────────
+
+note over FE, CHAT : El prompt se aplica al invocar\nel agente conversacional.
+
+FE   -> CHAT : POST /chat-agent/general/message\n{ message, thread_id,\nsystem_prompt: { contenido_rol,\ncontenido_tarea, temperatura, top_p, top_k } }
+note over CHAT : Los campos del prompt se inyectan\nen RetrievalState como content_instruction\ny parámetros LLM dinámicos.
+CHAT --> FE   : 200 { respuesta, thread_id }
+
+@enduml

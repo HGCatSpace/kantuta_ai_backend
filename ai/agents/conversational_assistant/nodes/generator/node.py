@@ -4,16 +4,23 @@ from ai.agents.conversational_assistant.states import RetrievalState
 
 # --- 1. DEFINICIÓN DE TEMPLATES (Aquí mismo para evitar errores) ---
 
-SYSTEM_TEMPLATE = """Eres **Kantuta AI**, un asistente legal experto en la legislación de Bolivia.
+SYSTEM_TEMPLATE = """Eres **Kantuta AI**, un asistente legal experto en la normativa de Bolivia.
 
 TU OBJETIVO:
 Responder a la pregunta del usuario basándote **ÚNICA Y EXCLUSIVAMENTE** en el CONTEXTO LEGAL proporcionado.
 
+ESTILO DE COMNUNICACIÓN
+Profesional legal: Explicaciones comprensibles citando si se puede las bases legales.
+Empático: Mostrar sensibilidad en temas emocionales, como conflictos familiares o situaciones de violencia.
+Neutral y objetivo: Evitar juicios personales y centrarse en la legislación aplicable.
+
 REGLAS:
-1.  **Cita las fuentes:** Si usas información del contexto, menciona el documento (ej: "Según el Artículo 45... [libro: nombre_del_libreo, pag: pagina]").
-3.  **Tono:** Formal, jurídico y preciso.
-4.  **Formato:** Usa listas (bullets) si hay múltiples puntos.
-TAREA FINAL **Pega exactamente el los datos que tuviste de entrada**
+1.  **Cita las fuentes:** Si usas información del contexto, menciona el documento al final de la cita (ej: "Según el Artículo 45... [libro: nombre_del_libreo, pag: pagina]").
+2.  **Proporcionar explicaciones detalladas y simples para que tus usuarios puedan entender.**
+
+MANEJO DE PREGUNTAS AMBIGUAS
+- Si el usuario no es claro, pedir amablemente más información antes de dar una respuesta definitiva.
+- Si faltaría más información solicitar al usuario, también aclarar que puede subir sus pdf o textos a la base de conocimiento. Si tiene permisos que lo suba, si no, solicitar a un experto que los suba.
 """
 
 HUMAN_MSG_TEMPLATE = """CONTEXTO LEGAL RECUPERADO:
@@ -24,6 +31,37 @@ PREGUNTA DEL USUARIO:
 {mensaje}
 """
 
+SYSTEM_TEMPLATE_BASE = """Eres **Kantuta AI**, un asistente legal experto en la normativa de Bolivia.
+
+TU OBJETIVO:
+Responder a la pregunta del usuario basándote **ÚNICA Y EXCLUSIVAMENTE** en el CONTEXTO LEGAL proporcionado.
+Brindar orientación clara, precisa y fundamentada en la legislación boliviana para resolver problemas.
+Complementar el asesoramiento de un abogado humano, sin reemplazar el asesoramiento legal profesional en casos específicos o judicializados.
+
+ESTILO DE COMNUNICACIÓN
+Profesional legal: Explicaciones comprensibles citando si se puede las bases legales.
+Empático: Mostrar sensibilidad en temas emocionales, como conflictos familiares o situaciones de violencia.
+Neutral y objetivo: Evitar juicios personales y centrarse en la legislación aplicable.
+
+REGLAS:
+1.  **Cita las fuentes:** Si usas información del contexto, menciona el documento al final de la cita (ej: "Según el Artículo 45... [libro: nombre_del_libreo, pag: pagina]").
+2.  **Proporcionar explicaciones detalladas y simples para que tus usuarios puedan entender.**
+
+MANEJO DE PREGUNTAS AMBIGUAS
+- Si el usuario no es claro, pedir amablemente más información antes de dar una respuesta definitiva.
+- Si faltaría más información solicitar al usuario, también aclarar que puede subir sus pdf o textos a la base de conocimiento. Si tiene permisos que lo suba, si no, solicitar a un experto que los suba.
+"""
+
+HUMAN_MSG_TEMPLATE_BASE = """CONTEXTO LEGAL RECUPERADO:
+{context_text}
+
+---
+PREGUNTA DEL USUARIO:
+{mensaje}
+
+"""
+
+
 # --- 2. LÓGICA DEL NODO ---
 
 async def generate_node(state: RetrievalState):
@@ -31,12 +69,17 @@ async def generate_node(state: RetrievalState):
 
     messages = state.get("messages")
     raw_context = state.get("context", [])
+    system_prompt = state.get("content_instruction") or SYSTEM_TEMPLATE
+    if system_prompt != SYSTEM_TEMPLATE:
+        system_prompt = SYSTEM_TEMPLATE_BASE + system_prompt
+
+    print(f"[SYSTEM PROMPT] {system_prompt}")
     
     # Configuración dinámica
     threshold = state.get("score_threshold", 0.65) # Distancia máxima
     temp = state.get("temperature", 0.0)
     top_p = state.get("top_p", 0.9)
-    top_k = state.get("top_k", 40)
+    top_k = state.get("top_k", 20)
 
     # A. PROCESAMIENTO Y FILTRADO DEL CONTEXTO
     valid_docs = []
@@ -92,7 +135,8 @@ async def generate_node(state: RetrievalState):
     history = messages[:-1] 
     
     prompt_messages = [
-        SystemMessage(content=SYSTEM_TEMPLATE), 
+        SystemMessage(content=system_prompt), 
+        *history,
         augmented_message                        
     ]
 
@@ -106,6 +150,10 @@ async def generate_node(state: RetrievalState):
     )    
     
     print("🚀 [GENERATOR] Invocando LLM...")
+    print("Especificaciones del LLM:")
+    print(f"Temperature: {temp}")
+    print(f"Top P: {top_p}")
+    print(f"Top K: {top_k}")
     try:
         response = await llm.ainvoke(prompt_messages)
         print("✅ [GENERATOR] Respuesta generada.")

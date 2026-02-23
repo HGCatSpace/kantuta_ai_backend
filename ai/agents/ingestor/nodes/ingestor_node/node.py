@@ -75,10 +75,6 @@ async def vector_store_node(state: IngestionState, config: RunnableConfig) -> Di
         print(f"💾 [VECTOR STORE] Indexando {len(chunks)} fragmentos...")
 
         # Enriquecimiento (Ligero, puede quedarse aquí)
-        for chunk in chunks:
-            filename = chunk.metadata.get("source_filename", "Desconocido")
-            if "Documento Fuente:" not in chunk.page_content:
-                chunk.page_content = f"Documento Fuente: {filename}\nContenido Legal:\n{chunk.page_content}"
 
         # --- INGESTA ASÍNCRONA ---
         # aadd_documents YA es asíncrono nativo, así que usamos await directo

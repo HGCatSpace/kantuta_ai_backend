@@ -21,7 +21,7 @@ def get_embedding_model():
     
     return embeddings
 
-def get_chat_model(temperature: float = 0.0, top_p: float = 0.9, top_k: int = 40):
+def get_chat_model(temperature: float = 0.0, top_p: float = 0.95, top_k: int = 20):
     """
     Factory que configura el modelo con parámetros dinámicos.
     """
@@ -31,12 +31,12 @@ def get_chat_model(temperature: float = 0.0, top_p: float = 0.9, top_k: int = 40
     llm = ChatOllama(
         model=model_name,
         base_url=ollama_url,
-        temperature=temperature
-        #top_p=top_p,
-        #top_k=top_k,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
         # Otros parámetros útiles para RAG:
-        #keep_alive="5m",
-        #num_ctx=4096, # Ventana de contexto amplia para leer leyes largas
+        keep_alive="5m",
+        num_ctx=4096, # Ventana de contexto amplia para leer leyes largas
     )
     
     return llm
