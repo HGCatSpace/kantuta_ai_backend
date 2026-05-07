@@ -45,7 +45,7 @@ services:
       - ollama_data:/root/.ollama
     ports:
       - "11435:11434"
-    entrypoint: sh -c "ollama serve & sleep 5 && ollama pull qwen3:8b && ollama pull qwen3-embedding:8b && wait"
+    entrypoint: sh -c "ollama serve & sleep 5 && ollama pull qwen3:8b && ollama pull qwen3-embedding:8b && ollama pull qwen3.5:4b && wait"
     
     # --- ACCESO A GPU ---
     deploy:
