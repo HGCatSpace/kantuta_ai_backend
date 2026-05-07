@@ -1,6 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, status, HTTPException, Query
 from sqlmodel import select
@@ -14,6 +14,16 @@ from db import get_session
 from models.user import Usuario, UsuarioCreate, UsuarioUpdate, ActiveUserEnum
 from models.action import Action
 from models.links import UsuarioActionLink
+from models.casos import Caso, EstadoCaso
+from models.documento_conocimiento import DocumentoConocimiento
+from models.chat_session import ChatSession
+from app.schemas.user import UserDashboardSchema, DocumentoRecienteSchema
+
+ACCION_GESTION_DOCS = "Gestión de documentos para la base de conocimiento"
+
+
+def _bolivia_now():
+    return datetime.now(ZoneInfo("America/La_Paz")).replace(tzinfo=None)
 
 router = APIRouter(
     prefix="/users",
@@ -45,17 +55,9 @@ async def read_users_me(
     return result.scalar_one()
 
 # ==========================================
-# 0. DASHBOARD (DTOs y Endpoint)
+# 0. DASHBOARD (Endpoint)
+# El DTO vive en app/schemas/user.py
 # ==========================================
-
-class UserDashboardSchema(BaseModel):
-    id: int
-    nombre_completo: str
-    email: str
-    rol: Optional[str] = None       # Nombre del rol (ej: "Abogado Senior")
-    casos_activos: int = 0          # Conteo de casos
-    documentos_recientes: int = 0   # Conteo de docs
-    ultimo_acceso: datetime         # Mapeado desde fecha_ultima_modificacion
 
 @router.get("/dashboard", response_model=UserDashboardSchema)
 async def read_dashboard_data(
@@ -63,31 +65,77 @@ async def read_dashboard_data(
     current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Endpoint para alimentar el 'Dashboard de Usuario v2'.
-    Retorna información agregada y transforma IDs a nombres legibles.
+    Dashboard del usuario autenticado.
+
+    Devuelve:
+    - casos_activos: COUNT de casos con estado != ARCHIVADO.
+    - documentos_recientes: hasta 5 documentos más recientes (solo si el usuario
+      tiene la acción 'Gestión de documentos para la base de conocimiento').
+    - sesiones_chat_30d: COUNT de ChatSession del usuario en los últimos 30 días.
+    - ultimo_acceso: fecha_ultima_modificacion del usuario.
     """
-    # Recargamos relaciones necesarias para contar
-    # Nota: selectinload es eficiente para 1:N
+    # 1. Cargar usuario con rol + acciones (para gating de documentos)
     statement = select(Usuario).where(Usuario.id == current_user.id).options(
         selectinload(Usuario.rol),
-        selectinload(Usuario.casos),
-        selectinload(Usuario.documentos_conocimiento)
+        selectinload(Usuario.actions),
     )
     result = await session.execute(statement)
     user_loaded = result.scalar_one()
 
-    # Mapeo manual al Schema (DTO)
+    nombres_acciones = {a.nombre for a in user_loaded.actions}
+    puede_ver_docs = ACCION_GESTION_DOCS in nombres_acciones
+
+    # 2. Casos activos: COUNT en SQL filtrando por estado != ARCHIVADO
+    stmt_casos = (
+        select(func.count(Caso.id_caso))
+        .where(Caso.usuario_id == user_loaded.id, Caso.estado != EstadoCaso.ARCHIVADO)
+    )
+    result = await session.execute(stmt_casos)
+    casos_activos = result.scalar_one() or 0
+
+    # 3. Documentos recientes: top 5 por fecha_creacion, solo si tiene la acción
+    documentos_recientes: List[DocumentoRecienteSchema] = []
+    if puede_ver_docs:
+        stmt_docs = (
+            select(DocumentoConocimiento)
+            .where(DocumentoConocimiento.usuario_id == user_loaded.id)
+            .order_by(DocumentoConocimiento.fecha_creacion.desc())
+            .limit(5)
+        )
+        result = await session.execute(stmt_docs)
+        documentos_recientes = [
+            DocumentoRecienteSchema(
+                id_documento=doc.id_documento,
+                titulo=doc.titulo,
+                categoria=doc.categoria.value if hasattr(doc.categoria, "value") else str(doc.categoria),
+                fecha_creacion=doc.fecha_creacion,
+            )
+            for doc in result.scalars().all()
+        ]
+
+    # 4. Sesiones de chat en los últimos 30 días.
+    # ChatSession se relaciona al usuario via Caso, así que hacemos JOIN.
+    hace_30d = _bolivia_now() - timedelta(days=30)
+    stmt_sesiones = (
+        select(func.count(ChatSession.id_session))
+        .join(Caso, ChatSession.caso_id == Caso.id_caso)
+        .where(
+            Caso.usuario_id == user_loaded.id,
+            ChatSession.fecha_creacion >= hace_30d,
+        )
+    )
+    result = await session.execute(stmt_sesiones)
+    sesiones_chat_30d = result.scalar_one() or 0
+
     return UserDashboardSchema(
         id=user_loaded.id,
         nombre_completo=user_loaded.nombre_completo,
         email=user_loaded.email,
-        # Si tiene rol, usamos su nombre, sino None
         rol=user_loaded.rol.nombre if user_loaded.rol else "Sin Rol",
-        # Contamos las listas cargadas
-        casos_activos=len(user_loaded.casos),
-        documentos_recientes=len(user_loaded.documentos_conocimiento),
-        # Requerimiento específico: ultimo_acceso = fecha_ultima_modificacion
-        ultimo_acceso=user_loaded.fecha_ultima_modificacion
+        casos_activos=casos_activos,
+        documentos_recientes=documentos_recientes,
+        sesiones_chat_30d=sesiones_chat_30d,
+        ultimo_acceso=user_loaded.fecha_ultima_modificacion,
     )
 
 # --- COUNT ---

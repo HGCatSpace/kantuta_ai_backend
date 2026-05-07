@@ -37,6 +37,7 @@ def get_chat_model(temperature: float = 0.0, top_p: float = 0.95, top_k: int = 2
         # Otros parámetros útiles para RAG:
         keep_alive="5m",
         num_ctx=4096, # Ventana de contexto amplia para leer leyes largas
-    )
+        reasoning=False
+    ) 
     
     return llm

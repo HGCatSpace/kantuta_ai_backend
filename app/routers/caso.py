@@ -1,7 +1,9 @@
+from io import BytesIO
 from typing import List, Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, status, HTTPException, Query
+from fastapi import APIRouter, Depends, status, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlmodel import select, SQLModel
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +11,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db import get_session
 from models.casos import Caso, CasoCreate, CasoUpdate, EstadoCaso
 from models.documentos import Documento
+from models.chat_session import ChatSession
 from models.user import Usuario
 from app.core.deps import get_current_user
+from ai.agents.conversational_assistant.agent import builder as conversational_builder
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    PageBreak,
+    HRFlowable,
+)
 
 
 # --- DTO para detalle de caso (NO toca el modelo de BD) ---
@@ -186,6 +203,233 @@ async def update_caso(
     await session.commit()
     await session.refresh(caso_db)
     return caso_db
+
+# --- 5.5 EXPORTAR HISTORIAL DEL CASO A PDF ---
+@router.get("/{id_caso}/exportar")
+async def exportar_historial_caso(
+    id_caso: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Exporta el historial conversacional completo de un caso a PDF.
+
+    Recorre todas las ChatSession del caso, recupera el estado del agente desde
+    el checkpointer de LangGraph y serializa los pares pregunta-respuesta junto
+    con las citas normativas extraídas del contexto RAG.
+    """
+    # 1. Validar caso y propiedad
+    caso = await session.get(Caso, id_caso)
+    if not caso:
+        raise HTTPException(status_code=404, detail="Caso no encontrado")
+    if caso.usuario_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este caso.",
+        )
+
+    # 2. Sesiones de chat del caso
+    stmt = (
+        select(ChatSession)
+        .where(ChatSession.caso_id == id_caso)
+        .order_by(ChatSession.fecha_creacion.asc())
+    )
+    result = await session.execute(stmt)
+    sesiones = result.scalars().all()
+
+    # 3. Checkpointer + agente compilado
+    checkpointer = request.app.state.checkpointer
+    if not checkpointer:
+        raise HTTPException(status_code=500, detail="Checkpointer no inicializado")
+    agent = conversational_builder.compile(checkpointer=checkpointer)
+
+    # 4. Recolectar conversación por sesión
+    sesiones_data = []
+    for sesion in sesiones:
+        config = {"configurable": {"thread_id": sesion.id_session}}
+        try:
+            snapshot = await agent.aget_state(config)
+        except Exception:
+            snapshot = None
+
+        mensajes = []
+        contexto_global = []
+        if snapshot and snapshot.values:
+            raw_messages = snapshot.values.get("messages", [])
+            raw_context = snapshot.values.get("context", [])
+
+            # Citas normativas (source_filename + page_label) deduplicadas
+            seen = set()
+            for item in raw_context:
+                # context puede venir como Document o (Document, score)
+                doc = item[0] if isinstance(item, (list, tuple)) else item
+                meta = getattr(doc, "metadata", {}) or {}
+                src = meta.get("source_filename") or meta.get("source") or "fuente desconocida"
+                page = meta.get("page_label") or meta.get("page", "")
+                clave = (src, str(page))
+                if clave in seen:
+                    continue
+                seen.add(clave)
+                contexto_global.append({"source": src, "page": str(page)})
+
+            # Pares Q/A
+            for msg in raw_messages:
+                tipo = getattr(msg, "type", None)
+                contenido = getattr(msg, "content", "")
+                if isinstance(contenido, list):
+                    contenido = "".join(
+                        c.get("text", "") if isinstance(c, dict) else str(c) for c in contenido
+                    )
+                if tipo in ("human", "ai"):
+                    mensajes.append({"rol": tipo, "texto": str(contenido)})
+
+        sesiones_data.append({
+            "titulo": sesion.titulo,
+            "fecha_creacion": sesion.fecha_creacion,
+            "mensajes": mensajes,
+            "citas": contexto_global,
+        })
+
+    # 5. Generar PDF en memoria
+    pdf_bytes = _construir_pdf_caso(caso, sesiones_data, current_user)
+
+    nombre_archivo = f"caso_{caso.id_caso}_historial.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
+
+
+def _escapar_html(texto: str) -> str:
+    """Escapa caracteres conflictivos para reportlab Paragraph (mini HTML)."""
+    return (
+        texto.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace("\n", "<br/>")
+    )
+
+
+def _construir_pdf_caso(caso: Caso, sesiones_data: list, current_user: Usuario) -> bytes:
+    """Arma el PDF del historial conversacional usando reportlab."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+        title=f"Historial Caso {caso.id_caso}",
+        author=current_user.nombre_completo,
+    )
+
+    styles = getSampleStyleSheet()
+    estilo_titulo = ParagraphStyle(
+        "TituloCaso", parent=styles["Title"], fontSize=18, textColor=colors.HexColor("#8B0F2C"),
+        spaceAfter=14, alignment=TA_LEFT,
+    )
+    estilo_h2 = ParagraphStyle(
+        "H2Sesion", parent=styles["Heading2"], fontSize=13, textColor=colors.HexColor("#1f2937"),
+        spaceBefore=12, spaceAfter=6,
+    )
+    estilo_meta = ParagraphStyle(
+        "Meta", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#6b7280"),
+        spaceAfter=6,
+    )
+    estilo_pregunta = ParagraphStyle(
+        "Pregunta", parent=styles["Normal"], fontSize=10, leftIndent=10,
+        textColor=colors.HexColor("#0f172a"), spaceBefore=8, spaceAfter=4,
+        alignment=TA_JUSTIFY,
+    )
+    estilo_respuesta = ParagraphStyle(
+        "Respuesta", parent=styles["Normal"], fontSize=10, leftIndent=10,
+        textColor=colors.HexColor("#1f2937"), spaceAfter=4, alignment=TA_JUSTIFY,
+    )
+    estilo_citas_titulo = ParagraphStyle(
+        "CitasTitulo", parent=styles["Normal"], fontSize=10, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#8B0F2C"), spaceBefore=8, spaceAfter=4,
+    )
+    estilo_cita = ParagraphStyle(
+        "Cita", parent=styles["Normal"], fontSize=9, leftIndent=14,
+        textColor=colors.HexColor("#374151"),
+    )
+    estilo_pie = ParagraphStyle(
+        "Pie", parent=styles["Normal"], fontSize=8, alignment=TA_LEFT,
+        textColor=colors.HexColor("#6b7280"),
+    )
+
+    story = []
+
+    # ── Cabecera ──
+    story.append(Paragraph(f"Caso N° {caso.id_caso}: {_escapar_html(caso.titulo)}", estilo_titulo))
+    if caso.descripcion:
+        story.append(Paragraph(_escapar_html(caso.descripcion), estilo_meta))
+    story.append(Paragraph(
+        f"Estado: <b>{caso.estado.value if hasattr(caso.estado, 'value') else caso.estado}</b> · "
+        f"Creado: {caso.fecha_creacion.strftime('%d/%m/%Y %H:%M')} · "
+        f"Actualizado: {caso.fecha_actualizacion.strftime('%d/%m/%Y %H:%M')}",
+        estilo_meta,
+    ))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e2e8f0")))
+    story.append(Spacer(1, 0.3 * cm))
+
+    # ── Sesiones ──
+    if not sesiones_data:
+        story.append(Paragraph("Este caso aún no tiene sesiones de chat.", estilo_meta))
+    else:
+        for idx, sesion in enumerate(sesiones_data, start=1):
+            story.append(Paragraph(
+                f"Sesión {idx} — {_escapar_html(sesion['titulo'])}",
+                estilo_h2,
+            ))
+            story.append(Paragraph(
+                f"Inicio: {sesion['fecha_creacion'].strftime('%d/%m/%Y %H:%M')}",
+                estilo_meta,
+            ))
+
+            if not sesion["mensajes"]:
+                story.append(Paragraph("(Sin mensajes registrados.)", estilo_meta))
+            else:
+                for msg in sesion["mensajes"]:
+                    if msg["rol"] == "human":
+                        story.append(Paragraph(
+                            f"<b>Pregunta:</b> {_escapar_html(msg['texto'])}",
+                            estilo_pregunta,
+                        ))
+                    else:
+                        story.append(Paragraph(
+                            f"<b>Respuesta:</b> {_escapar_html(msg['texto'])}",
+                            estilo_respuesta,
+                        ))
+
+            # Citas normativas a nivel de sesión
+            if sesion["citas"]:
+                story.append(Paragraph("Citas normativas consultadas:", estilo_citas_titulo))
+                for cita in sesion["citas"]:
+                    story.append(Paragraph(
+                        f"• {_escapar_html(cita['source'])} (pág. {_escapar_html(cita['page'])})",
+                        estilo_cita,
+                    ))
+
+            if idx < len(sesiones_data):
+                story.append(Spacer(1, 0.3 * cm))
+                story.append(HRFlowable(width="100%", thickness=0.3, color=colors.HexColor("#e5e7eb")))
+
+    # ── Pie ──
+    story.append(Spacer(1, 0.6 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e2e8f0")))
+    fecha_export = datetime.now(ZoneInfo("America/La_Paz")).strftime("%d/%m/%Y %H:%M")
+    story.append(Paragraph(
+        f"Exportado el {fecha_export} por {_escapar_html(current_user.nombre_completo)} · Kantuta AI",
+        estilo_pie,
+    ))
+
+    doc.build(story)
+    return buffer.getvalue()
+
 
 # --- 6. BORRAR (SOFT DELETE / ARCHIVAR) ---
 @router.delete("/{id_caso}", response_model=Caso)

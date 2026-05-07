@@ -55,6 +55,7 @@ ACTIONS = [
     {"nombre": "Gestión de prompts",                                 "descripcion": "Crear y administrar prompts del sistema."},
     {"nombre": "Gestión de documentos para la base de conocimiento", "descripcion": "Subir y administrar documentos en la base de conocimiento."},
     {"nombre": "Gestión de usuarios",                                "descripcion": "Administrar usuarios del sistema."},
+    {"nombre": "Informes y reportes",                                "descripcion": "Consultar el reporte global de actividad del sistema."},
 ]
 
 # Acciones por rol (usando los nombres definidos arriba)
@@ -75,6 +76,7 @@ ROLE_ACTIONS = {
         "Gestión de prompts",
         "Gestión de documentos para la base de conocimiento",
         "Gestión de usuarios",
+        "Informes y reportes",
     ],
 }
 
@@ -116,6 +118,23 @@ async def seed():
         await conn.run_sync(SQLModel.metadata.create_all)
 
     async with async_session() as session:
+
+        # ── 0. Migración inline: renombrar acciones antiguas ──
+        # 'ver_reporte_actividad' (snake_case) → 'Informes y reportes'
+        result = await session.execute(
+            select(Action).where(Action.nombre == "ver_reporte_actividad")
+        )
+        legacy_action = result.scalar_one_or_none()
+        if legacy_action:
+            # Borrar links de usuarios a la acción antigua (se reasignarán en paso 4)
+            await session.execute(
+                UsuarioActionLink.__table__.delete().where(
+                    UsuarioActionLink.action_id == legacy_action.id_action
+                )
+            )
+            await session.delete(legacy_action)
+            await session.commit()
+            print("  🔄 Acción legacy 'ver_reporte_actividad' eliminada (será reemplazada por 'Informes y reportes').")
 
         # ── 1. Roles ──────────────────────────────
         print("\n[1/4] Creando roles...")
