@@ -26,7 +26,7 @@ def _to_public(prompt: SystemPrompt) -> SystemPromptPublic:
     """Convierte un SystemPrompt (table) a SystemPromptPublic, incluyendo nombre del creador."""
     data = prompt.model_dump()
     data["nombre_creador"] = (
-        prompt.experto_creador.nombre_completo
+        f"{prompt.experto_creador.nombres} {prompt.experto_creador.apellido_paterno} {prompt.experto_creador.apellido_materno}"
         if prompt.experto_creador else None
     )
     # Include linked document IDs

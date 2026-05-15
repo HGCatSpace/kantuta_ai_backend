@@ -60,7 +60,7 @@ async def login_for_access_token(
         "access_token": access_token,
         "token_type": "bearer",
         "user_data": {
-            "nombre": user.nombre_completo,
+            "nombre": f"{user.nombres} {user.apellido_paterno} {user.apellido_materno}",
             "email": user.email,
             "rol_nombre": user.rol.nombre if user.rol else None,
             "activo": user.activo,

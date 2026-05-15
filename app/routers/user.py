@@ -129,7 +129,9 @@ async def read_dashboard_data(
 
     return UserDashboardSchema(
         id=user_loaded.id,
-        nombre_completo=user_loaded.nombre_completo,
+        nombres=user_loaded.nombres,
+        apellido_paterno=user_loaded.apellido_paterno,
+        apellido_materno=user_loaded.apellido_materno,
         email=user_loaded.email,
         rol=user_loaded.rol.nombre if user_loaded.rol else "Sin Rol",
         casos_activos=casos_activos,

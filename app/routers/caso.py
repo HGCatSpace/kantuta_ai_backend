@@ -323,7 +323,7 @@ def _construir_pdf_caso(caso: Caso, sesiones_data: list, current_user: Usuario) 
         topMargin=2 * cm,
         bottomMargin=2 * cm,
         title=f"Historial Caso {caso.id_caso}",
-        author=current_user.nombre_completo,
+        author=f"{current_user.nombres} {current_user.apellido_paterno} {current_user.apellido_materno}",
     )
 
     styles = getSampleStyleSheet()
@@ -423,7 +423,7 @@ def _construir_pdf_caso(caso: Caso, sesiones_data: list, current_user: Usuario) 
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e2e8f0")))
     fecha_export = datetime.now(ZoneInfo("America/La_Paz")).strftime("%d/%m/%Y %H:%M")
     story.append(Paragraph(
-        f"Exportado el {fecha_export} por {_escapar_html(current_user.nombre_completo)} · Kantuta AI",
+        f"Exportado el {fecha_export} por {_escapar_html(f'{current_user.nombres} {current_user.apellido_paterno} {current_user.apellido_materno}')} · Kantuta AI",
         estilo_pie,
     ))
 

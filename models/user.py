@@ -26,7 +26,9 @@ class ActiveUserEnum(str, Enum):
 class UsuarioBase(SQLModel):
     nombre_de_usuario: str = Field(index=True, unique=True)
     email: str = Field(unique=True, index=True)
-    nombre_completo: str
+    nombres: str
+    apellido_paterno: str
+    apellido_materno: str
     activo: ActiveUserEnum = Field(default=ActiveUserEnum.ACTIVE)
     id_rol: Optional[int] = Field(default=None, foreign_key="roles.id_rol")
 
@@ -61,7 +63,9 @@ class UsuarioCreate(UsuarioBase):
     password: str # El usuario envía la password plana aquí
 
 class UsuarioUpdate(SQLModel):
-    nombre_completo: Optional[str] = None
+    nombres: Optional[str] = None
+    apellido_paterno: Optional[str] = None
+    apellido_materno: Optional[str] = None
     email: Optional[str] = None
     activo: Optional[ActiveUserEnum] = None
     password: Optional[str] = None

@@ -16,7 +16,9 @@ class DocumentoRecienteSchema(BaseModel):
 class UserDashboardSchema(BaseModel):
     """Payload del endpoint GET /users/dashboard."""
     id: int
-    nombre_completo: str
+    nombres: str
+    apellido_paterno: str
+    apellido_materno: str
     email: str
     rol: Optional[str] = None
     casos_activos: int = 0
