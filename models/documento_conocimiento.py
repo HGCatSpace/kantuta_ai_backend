@@ -17,11 +17,10 @@ def bolivia_now():
 
 # --- ENUMS (Para restringir valores en BD y Frontend) ---
 class EnumCategoriaBiblioteca(str, Enum):
-    CONTRATOS = "Contratos"
-    LITIGIOS = "Litigios"
-    CORPORATIVO = "Corporativo"
-    LABORAL = "Laboral"
-    OTROS = "Otros"
+    NORMATIVA_SUSTANTIVA = "Normativa sustantiva"
+    NORMATIVA_ADJETIVA = "Normativa adjetiva (procesal)"
+    NORMATIVA_GENERAL = "Normativa general / principios"
+    MATERIAL_REFERENCIA = "Material de referencia"
 
 class EnumIconoArchivo(str, Enum):
     PDF = "pdf"       # Color Rojo en front
@@ -39,7 +38,7 @@ class EnumEstadoIndexacion(str, Enum):
 # ==========================================
 class DocumentoConocimientoBase(SQLModel):
     titulo: str = Field(max_length=255, index=True)
-    categoria: EnumCategoriaBiblioteca = Field(default=EnumCategoriaBiblioteca.OTROS)
+    categoria: EnumCategoriaBiblioteca = Field(default=EnumCategoriaBiblioteca.MATERIAL_REFERENCIA)
     icono: EnumIconoArchivo = Field(default=EnumIconoArchivo.OTHER)
     descripcion: Optional[str] = Field(default=None, max_length=500)
 
@@ -71,6 +70,10 @@ class DocumentoConocimiento(DocumentoConocimientoBase, table=True):
     ultima_modificacion: datetime = Field(default_factory=bolivia_now)
     estado_indexacion: EnumEstadoIndexacion = Field(default=EnumEstadoIndexacion.PENDIENTE)
 
+    # --- Progreso de indexación (chunks embebidos / chunks totales) ---
+    chunks_procesados: Optional[int] = Field(default=None)
+    chunks_totales: Optional[int] = Field(default=None)
+
 # ==========================================
 # 3. MODELO CREATE (Input para POST)
 # ==========================================
@@ -99,3 +102,5 @@ class DocumentoConocimientoPublic(DocumentoConocimientoBase):
     fecha_creacion: datetime
     ultima_modificacion: datetime
     nombre_archivo: Optional[str] = None
+    chunks_procesados: Optional[int] = None
+    chunks_totales: Optional[int] = None

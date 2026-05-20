@@ -6,7 +6,7 @@ funciones standalone invocables desde los endpoints REST.
 
 import os
 import asyncio
-from typing import List
+from typing import List, Awaitable, Callable, Optional
 
 import chromadb
 from langchain_chroma import Chroma
@@ -115,10 +115,25 @@ def _split_documents(docs: List[Document]) -> List[Document]:
 
 # ─── Public API ───
 
-async def ingest_file(file_path: str, source_filename: str, extra_metadata: dict | None = None) -> int:
+ProgressCallback = Callable[[int, int], Awaitable[None]]
+
+# Tamaño de lote para embeddings: balance entre granularidad de progreso y overhead
+EMBEDDING_BATCH_SIZE = 16
+
+
+async def ingest_file(
+    file_path: str,
+    source_filename: str,
+    extra_metadata: dict | None = None,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> int:
     """
     Pipeline completo: carga → fragmenta → enriquece → almacena en ChromaDB.
     Retorna la cantidad de chunks indexados.
+
+    Si `progress_callback` se provee, se invoca con (procesados, totales) tras
+    cada batch de chunks embebidos. También se invoca una vez con (0, total)
+    apenas se conoce el total.
     """
     print(f"📥 [INGEST] Procesando: {source_filename}")
 
@@ -133,15 +148,34 @@ async def ingest_file(file_path: str, source_filename: str, extra_metadata: dict
 
     # Split
     chunks = await asyncio.to_thread(_split_documents, docs)
-    print(f"   ✂️  {len(chunks)} fragmentos generados")
+    total = len(chunks)
+    print(f"   ✂️  {total} fragmentos generados")
 
+    # Reportar progreso inicial (0/total) para que la UI pueda calcular ya
+    if progress_callback:
+        try:
+            await progress_callback(0, total)
+        except Exception as cb_err:
+            print(f"   ⚠️ progress_callback falló: {cb_err}")
 
-    # Store
+    if total == 0:
+        return 0
+
+    # Store por lotes — reporta progreso después de cada batch
     vector_store = await asyncio.to_thread(_get_vector_store)
-    ids = await vector_store.aadd_documents(documents=chunks)
-    print(f"   ✅ {len(ids)} vectores almacenados en ChromaDB")
+    total_ids = 0
+    for i in range(0, total, EMBEDDING_BATCH_SIZE):
+        batch = chunks[i:i + EMBEDDING_BATCH_SIZE]
+        ids = await vector_store.aadd_documents(documents=batch)
+        total_ids += len(ids)
+        if progress_callback:
+            try:
+                await progress_callback(min(i + len(batch), total), total)
+            except Exception as cb_err:
+                print(f"   ⚠️ progress_callback falló: {cb_err}")
 
-    return len(ids)
+    print(f"   ✅ {total_ids} vectores almacenados en ChromaDB")
+    return total_ids
 
 
 async def delete_file_chunks(source_filename: str) -> int:

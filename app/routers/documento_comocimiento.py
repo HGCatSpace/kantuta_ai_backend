@@ -49,7 +49,7 @@ def _detect_icono(filename: str) -> EnumIconoArchivo:
 async def create_documento(
     archivo: UploadFile = File(...),
     titulo: str = Form(...),
-    categoria: EnumCategoriaBiblioteca = Form(EnumCategoriaBiblioteca.OTROS),
+    categoria: EnumCategoriaBiblioteca = Form(EnumCategoriaBiblioteca.MATERIAL_REFERENCIA),
     descripcion: Optional[str] = Form(None),
     etiquetas: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_session),
@@ -101,18 +101,36 @@ async def create_documento(
         doc_id = new_doc.id_documento
 
         async def _run_ingest():
-            """Background task: ingesta + actualización de estado."""
+            """Background task: ingesta + actualización de estado y progreso."""
             async_session = sessionmaker(
                 engine, class_=AsyncSession, expire_on_commit=False
             )
             async with async_session() as bg_session:
+
+                async def _update_progress(procesados: int, totales: int) -> None:
+                    """Persiste el progreso de embeddings en la BD."""
+                    doc_db = await bg_session.get(DocumentoConocimiento, doc_id)
+                    if doc_db:
+                        doc_db.chunks_procesados = procesados
+                        doc_db.chunks_totales = totales
+                        bg_session.add(doc_db)
+                        await bg_session.commit()
+
                 try:
-                    count = await ingest_file(str(file_path), original_name, extra_meta)
+                    count = await ingest_file(
+                        str(file_path),
+                        original_name,
+                        extra_meta,
+                        progress_callback=_update_progress,
+                    )
                     print(f"✅ [UPLOAD] {count} chunks indexados para '{original_name}'")
                     # Marcar como COMPLETADO
                     doc_db = await bg_session.get(DocumentoConocimiento, doc_id)
                     if doc_db:
                         doc_db.estado_indexacion = EnumEstadoIndexacion.COMPLETADO
+                        # Asegurar que el progreso quede en 100%
+                        if doc_db.chunks_totales:
+                            doc_db.chunks_procesados = doc_db.chunks_totales
                         bg_session.add(doc_db)
                         await bg_session.commit()
                 except Exception as ie:

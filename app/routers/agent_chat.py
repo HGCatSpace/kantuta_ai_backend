@@ -27,6 +27,38 @@ class UserMessage(BaseModel):
 def bolivia_now():
     return datetime.now(ZoneInfo("America/La_Paz")).replace(tzinfo=None)
 
+
+def _apply_system_prompt(input_state: dict, sp: dict | None) -> dict:
+    """
+    Inyecta los campos del system_prompt (dict del frontend) dentro del input_state
+    del agente. Mismas claves que usa el grafo: content_instruction, temperature,
+    top_p, top_k, document_ids.
+    """
+    if not sp:
+        return input_state
+
+    contenido_instruccion = ""
+    if "contenido_rol" in sp:
+        contenido_instruccion += f"<rol> {sp['contenido_rol']} </rol>\n"
+    if "contenido_tarea" in sp:
+        contenido_instruccion += f"<tarea> {sp['contenido_tarea']} </tarea>\n"
+    if "contenido_alcances" in sp:
+        contenido_instruccion += f"<alcances> {sp['contenido_alcances']} </alcances>\n"
+    if "contenido_contexto" in sp:
+        contenido_instruccion += f"<contexto> {sp['contenido_contexto']} </contexto>\n"
+
+    input_state["content_instruction"] = contenido_instruccion
+    if "temperatura" in sp:
+        input_state["temperature"] = sp["temperatura"]
+    if "top_p" in sp:
+        input_state["top_p"] = sp["top_p"]
+    if "top_k" in sp:
+        input_state["top_k"] = sp["top_k"]
+    # Si el prompt no tiene documentos vinculados, dejamos lista vacía (búsqueda global)
+    input_state["document_ids"] = sp.get("documentos_conocimiento", []) or []
+
+    return input_state
+
 # ==================================================
 # CHAT GENERAL (sin sesión en DB)
 # ==================================================
@@ -146,10 +178,13 @@ async def stream_general_chat(
     config = {"configurable": {"thread_id": thread_id}}
     human_message = HumanMessage(content=user_msg.content)
 
+    # Aplicar system_prompt opcional (modo del agente)
+    input_state = _apply_system_prompt({"messages": human_message}, user_msg.system_prompt)
+
     async def event_generator():
         try:
             async for event in agent_with_memory.astream_events(
-                {"messages": human_message}, config=config, version="v2"
+                input_state, config=config, version="v2"
             ):
                 kind = event.get("event")
                 if kind == "on_chat_model_stream":
@@ -265,49 +300,7 @@ async def stream_chat_with_agent(
     human_message = HumanMessage(content=user_msg.content)
 
     # Preparar el estado inicial con overrides del system prompt si existen
-    input_state = {"messages": human_message}
-    
-    if user_msg.system_prompt:
-        sp: SystemPrompt = user_msg.system_prompt
-        # Mapear campos del fr
-        # ontend a llaves del State
-
-        # contenido_rol: Optional[str] = None
-        # contenido_tarea: Optional[str] = None
-        # contenido_alcances: Optional[str] = None
-        # contenido_contexto: Optional[str] = None
-
-        contenido_instruccion = ""
-        if "contenido_rol" in sp:
-            contenido_instruccion += f"<rol> {sp['contenido_rol']} </rol>\n"
-        if "contenido_tarea" in sp:
-            contenido_instruccion += f"<tarea> {sp['contenido_tarea']} </tarea>\n"
-        if "contenido_alcances" in sp:
-            contenido_instruccion += f"<alcances> {sp['contenido_alcances']} </alcances>\n"
-        if "contenido_contexto" in sp:
-            contenido_instruccion += f"<contexto> {sp['contenido_contexto']} </contexto>\n"
-
-        doc_id_filter = []
-        if "documentos_conocimiento" in sp:
-            doc_id_filter = sp["documentos_conocimiento"]
-
-
-        input_state["content_instruction"] = contenido_instruccion
-        if "temperatura" in sp:
-            input_state["temperature"] = sp["temperatura"]
-        if "top_p" in sp:
-            input_state["top_p"] = sp["top_p"]
-        if "top_k" in sp:
-            input_state["top_k"] = sp["top_k"]
-        if "documentos_conocimiento" in sp:
-            input_state["document_ids"] = sp["documentos_conocimiento"]
-        else:
-            # Si el prompt no tiene documentos, asumimos lista vacía (No RAG)
-            # Esto evita que se quede con los IDs de una configuración anterior si el usuario los quitó
-            input_state["document_ids"] = []
-
-        for key, content in input_state.items():
-            print(f"|----------------------Key: {key}, Content: {content}")
+    input_state = _apply_system_prompt({"messages": human_message}, user_msg.system_prompt)
 
     async def event_generator():
         try:
